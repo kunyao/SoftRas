@@ -1,6 +1,7 @@
 import argparse
 
 import torch
+import torchvision
 import numpy as np
 from losses import multiview_iou_loss
 from utils import AverageMeter, img_cvt
@@ -85,7 +86,7 @@ if args.resume_path:
     optimizer.load_state_dict(state_dicts['optimizer'])
     start_iter = int(os.path.split(args.resume_path)[1][11:].split('.')[0]) + 1
     print('Resuming from %s iteration' % start_iter)
-    
+
 dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train')
 
 def train():
@@ -107,14 +108,15 @@ def train():
         viewpoints_b = viewpoints_b.cuda()
 
         # soft render images
-        render_images, laplacian_loss, flatten_loss = model([images_a, images_b], 
+        render_images, laplacian_loss, flatten_loss = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
                                                             task='train')
         laplacian_loss = laplacian_loss.mean()
         flatten_loss = flatten_loss.mean()
 
         # compute loss
-        loss = multiview_iou_loss(render_images, images_a, images_b) + \
+        loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, images_a, images_b)
+        loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
                args.lambda_laplacian * laplacian_loss + \
                args.lambda_flatten * flatten_loss
         losses.update(loss.data.item(), images_a.size(0))
@@ -141,19 +143,33 @@ def train():
             demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
             demo_v, demo_f = model.reconstruct(demo_image)
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
-            
-            imageio.imsave(os.path.join(image_output, '%07d_fake.png' % i), img_cvt(render_images[0][0]))
-            imageio.imsave(os.path.join(image_output, '%07d_input.png' % i), img_cvt(images_a[0]))
+
+            image_out = torch.cat((render_images[0][:, 3].detach()[:, None, :, :], images_a[:,3].detach()[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
+            torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_out.png' % i))
+
 
         # print
         if i % args.print_freq == 0:
             print('Iter: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f}\t'
-                  'Loss {loss.val:.3f}\t'
+                  'Loss0 {loss0:.3f}\t'
+                  'Loss1 {loss1:.3f}\t'
                   'lr {lr:.6f}\t'
                   'sv {sv:.6f}\t'.format(i, args.num_iterations,
-                                         batch_time=batch_time, loss=losses, 
+                                         batch_time=batch_time,
+                                         loss0=loss4.data, loss1=loss5.data,
                                          lr=lr, sv=model.renderer.rasterizer.sigma_val))
+
+            with open(os.path.join(directory_output, 'training_loss.txt'), 'a') as f:
+                f.write('Iter: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f}\t'
+                      'Loss0 {loss0:.3f}\t'
+                      'Loss1 {loss1:.3f}\t'
+                      'lr {lr:.6f}\t'
+                      'sv {sv:.6f}\n'.format(i, args.num_iterations,
+                                             batch_time=batch_time,
+                                             loss0=loss4.data, loss1=loss5.data,
+                                             lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
 
 def adjust_learning_rate(optimizers, learning_rate, i, method):
