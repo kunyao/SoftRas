@@ -14,12 +14,12 @@ def iou_loss(predict, target):
 
 def multiview_iou_loss(predicts, targets_a, targets_b):
     target_a = targets_a[:, 3].clone()
-    target_a[target_a > 0.1] = 1.0
-    target_a[target_a < 0.1] = 0.0
+    target_a[target_a > 0.0] = 1.0
+    # target_a[target_a < 0.1] = 0.0
 
     target_b = targets_b[:, 3].clone()
-    target_b[target_b > 0.1] = 1.0
-    target_b[target_b < 0.1] = 0.0
+    target_b[target_b > 0.0] = 1.0
+    # target_b[target_b < 0.1] = 0.0
 
     loss0 = iou_loss(predicts[0][:, 3], target_a)
     loss1 = iou_loss(predicts[1][:, 3], target_a)

@@ -3,6 +3,7 @@ Demo deform.
 Deform template mesh based on input silhouettes and camera pose
 """
 import torch
+import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -33,8 +34,8 @@ class Model(nn.Module):
         self.register_parameter('center', nn.Parameter(torch.zeros(1, 1, 3)))
 
         # define Laplacian and flatten geometry constraints
-        self.laplacian_loss = sr.LaplacianLoss(self.vertices[0].cpu(), self.faces[0].cpu())
-        self.flatten_loss = sr.FlattenLoss(self.faces[0].cpu())
+        # self.laplacian_loss = sr.LaplacianLoss(self.vertices[0].cpu(), self.faces[0].cpu())
+        # self.flatten_loss = sr.FlattenLoss(self.faces[0].cpu())
 
     def forward(self, batch_size):
         base = torch.log(self.vertices.abs() / (1 - self.vertices.abs()))
@@ -44,10 +45,12 @@ class Model(nn.Module):
         vertices = vertices + centroid
 
         # apply Laplacian and flatten geometry constraints
-        laplacian_loss = self.laplacian_loss(vertices).mean()
-        flatten_loss = self.flatten_loss(vertices).mean()
+        # laplacian_loss = self.laplacian_loss(vertices).mean()
+        # flatten_loss = self.flatten_loss(vertices).mean()
+        laplacian_loss = torch.tensor(0)
+        flatten_loss = torch.tensor(0)
 
-        return sr.Mesh(vertices.repeat(batch_size, 1, 1), 
+        return sr.Mesh(vertices.repeat(batch_size, 1, 1),
                        self.faces.repeat(batch_size, 1, 1)), laplacian_loss, flatten_loss
 
 
@@ -60,13 +63,13 @@ def neg_iou_loss(predict, target):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--filename-input', type=str, 
+    parser.add_argument('-i', '--filename-input', type=str,
         default=os.path.join(data_dir, 'source.npy'))
-    parser.add_argument('-c', '--camera-input', type=str, 
+    parser.add_argument('-c', '--camera-input', type=str,
         default=os.path.join(data_dir, 'camera.npy'))
-    parser.add_argument('-t', '--template-mesh', type=str, 
+    parser.add_argument('-t', '--template-mesh', type=str,
         default=os.path.join(data_dir, 'obj/sphere/sphere_1352.obj'))
-    parser.add_argument('-o', '--output-dir', type=str, 
+    parser.add_argument('-o', '--output-dir', type=str,
         default=os.path.join(data_dir, 'results/output_deform'))
     parser.add_argument('-b', '--batch-size', type=int,
         default=120)
@@ -75,7 +78,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = Model(args.template_mesh).cuda()
-    renderer = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard', 
+    renderer = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
                                camera_mode='look_at', viewing_angle=15)
 
     # read training images and camera poses
@@ -90,19 +93,28 @@ def main():
 
     loop = tqdm.tqdm(list(range(0, 2000)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
+
+    images_gt = torch.from_numpy(images).cuda()
+    images_gt[images_gt > 0.0] = 1.0
+    # images_gt[images_gt < 0.00] = 0.0
+
     for i in loop:
-        images_gt = torch.from_numpy(images).cuda()
+        # images_gt = torch.from_numpy(images).cuda()
 
         mesh, laplacian_loss, flatten_loss = model(args.batch_size)
         images_pred = renderer.render_mesh(mesh)
 
-        # optimize mesh with silhouette reprojection error and 
+        # optimize mesh with silhouette reprojection error and
         # geometry constraints
         loss = neg_iou_loss(images_pred[:, 3], images_gt[:, 3]) + \
                0.03 * laplacian_loss + \
                0.0003 * flatten_loss
 
-        loop.set_description('Loss: %.4f'%(loss.item()))
+        images_hard = images_pred.clone()
+        images_hard[images_hard < 0.95] = 0
+        images_hard[images_hard >= 0.95] = 1.0
+        hard_iou = neg_iou_loss(images_hard[:, 3], images_gt[:, 3])
+        loop.set_description('Loss: %.4f'%(hard_iou.item()))
 
         optimizer.zero_grad()
         loss.backward()
@@ -112,6 +124,8 @@ def main():
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
+            image_out = torch.cat((images_hard.detach()[:, 3][:, None, :, :], images_gt.detach()[:, 3][:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
+            torchvision.utils.save_image(image_out, os.path.join(args.output_dir, 'views_%05d.png'%i))
 
     # save optimized mesh
     model(1)[0].save_obj(os.path.join(args.output_dir, 'plane.obj'), save_texture=False)
