@@ -95,17 +95,27 @@ def train():
     data_time = AverageMeter()
     losses = AverageMeter()
 
+    model.renderer.set_distance_map(args.batch_size)
     for i in range(start_iter, args.num_iterations + 1):
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
+        model.renderer.set_beta(adjust_beta(i))
+        # model.renderer.set_win_size(adjust_win_size(i))
+        model.renderer.set_alpha(5.0)
 
         # load images from multi-view
-        images_a, images_b, viewpoints_a, viewpoints_b = dataset_train.get_random_batch(args.batch_size)
+        images_a, images_b, viewpoints_a, viewpoints_b, distances_a, distances_b, masks_a, masks_b = dataset_train.get_random_batch(args.batch_size)
         images_a = images_a.cuda()
         images_b = images_b.cuda()
         viewpoints_a = viewpoints_a.cuda()
         viewpoints_b = viewpoints_b.cuda()
+        distances_a = distances_a.cuda()
+        distances_b = distances_b.cuda()
+        masks_a = masks_a.cuda()
+        masks_b = masks_b.cuda()
+        distances_all = torch.cat((distances_a, distances_a, distances_b, distances_b), dim=0)
+        model.renderer.set_distance_map(0, distance_map=distances_all)
 
         # soft render images
         render_images, laplacian_loss, flatten_loss = model([images_a, images_b],
@@ -115,7 +125,8 @@ def train():
         flatten_loss = flatten_loss.mean()
 
         # compute loss
-        loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, images_a, images_b)
+        # loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, images_a, images_b)
+        loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, masks_a, masks_b)
         loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
                args.lambda_laplacian * laplacian_loss + \
                args.lambda_flatten * flatten_loss
@@ -144,7 +155,13 @@ def train():
             demo_v, demo_f = model.reconstruct(demo_image)
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
-            image_out = torch.cat((render_images[0][:, 3].detach()[:, None, :, :], images_a[:,3].detach()[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
+            render_out = render_images[0][:, 3].detach()
+            # gt_out = images_a[:,3].detach()
+            gt_out = masks_a.detach()
+            gt_out[gt_out > 0.0] = 1.0
+            # render_out[render_out > 0.5] = 1.0
+            render_out[render_out < 1.0] = 0.0
+            image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_out.png' % i))
 
 
@@ -193,6 +210,32 @@ def adjust_sigma(sigma, i):
     if i >= 150000:
         sigma *= decay
     return sigma
+
+def adjust_beta(i):
+    if i < 1000:
+        return 0
+    elif i < 2000:
+        return 0
+    elif i < 4000:
+        return 0
+    elif i < 6000:
+        return 0
+    elif i < 10000:
+        return 0
+    elif i < 15000:
+        return 0
+    else:
+        return 0
+
+def adjust_alpha(i):
+    if i < 1000:
+        return 5.0
+    elif i < 2000:
+        return 3.0
+    elif i < 3000:
+        return 2.0
+    else:
+        return 1.0
 
 
 train()

@@ -79,6 +79,9 @@ class SoftRenderer(nn.Module):
                                             sigma_val, dist_func, dist_eps,
                                             gamma_val, aggr_func_rgb, aggr_func_alpha,
                                             texture_type)
+        self.set_alpha()
+        self.set_win_size()
+        self.set_beta()
 
     def set_sigma(self, sigma):
         self.rasterizer.sigma_val = sigma
@@ -86,18 +89,46 @@ class SoftRenderer(nn.Module):
     def set_gamma(self, gamma):
         self.rasterizer.gamma_val = gamma
 
+    def set_win_size(self, win_size=40):
+        self.win_size = win_size
+
+    def set_alpha(self, alpha=5.0):
+        self.alpha = alpha
+
+    def set_beta(self, beta=0):
+        self.beta = beta
+
+    def set_distance_map(self, batch_size, distance_map=None):
+        if distance_map is None:
+            distance_map = torch.zeros(batch_size, 64, 64).cuda()
+        self.distance_map = distance_map
+
     def set_texture_mode(self, mode):
         assert mode in ['vertex', 'surface'], 'Mode only support surface and vertex'
 
         self.lighting.light_mode = mode
         self.rasterizer.texture_type = mode
 
-    def render_mesh(self, mesh, mode=None):
+    def get_area(self, mesh, mode=0):
+
+        v0 = mesh.face_vertices[:,:,0,:].clone()
+        v1 = mesh.face_vertices[:,:,1,:].clone()
+        v2 = mesh.face_vertices[:,:,2,:].clone()
+
+        if mode==1:
+            v0[:,:,2] = 0
+            v1[:,:,2] = 0
+            v2[:,:,2] = 0
+        area = torch.norm(torch.cross((v0 - v1), (v0 - v2)), dim=2)
+
+        return area
+
+    def render_mesh(self, mesh,  mode=None):
         self.set_texture_mode(mesh.texture_type)
         mesh = self.lighting(mesh)
         mesh = self.transform(mesh)
         # return self.rasterizer(mesh, mode)
-        return FragmentRasterize.apply(mesh.face_vertices, 64, 1, 0.001, 1.0)[:, None, :, :].repeat(1, 4, 1, 1)
+        return FragmentRasterize.apply(mesh.face_vertices, self.distance_map, 64, self.win_size, self.beta, self.alpha)[:, None, :, :].repeat(1, 4, 1, 1)
 
     def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface'):
         mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)

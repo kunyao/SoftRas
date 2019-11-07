@@ -4,7 +4,7 @@ import soft_renderer.functional as srf
 import torch
 import numpy as np
 import tqdm
-
+from scipy import ndimage
 
 class_ids_map = {
     '02691156': 'Airplane',
@@ -63,6 +63,11 @@ class ShapeNet(object):
         data_ids_b = np.zeros(batch_size, 'int32')
         viewpoint_ids_a = torch.zeros(batch_size)
         viewpoint_ids_b = torch.zeros(batch_size)
+        distances_a = torch.zeros(batch_size, 64, 64)
+        distances_b = torch.zeros(batch_size, 64, 64)
+        masks_a = torch.zeros(batch_size, 64, 64)
+        masks_b = torch.zeros(batch_size, 64, 64)
+
         for i in range(batch_size):
             class_id = np.random.choice(self.class_ids)
             object_id = np.random.randint(0, self.num_data[class_id])
@@ -73,6 +78,40 @@ class ShapeNet(object):
             data_id_b = (object_id + self.pos[class_id]) * 24 + viewpoint_id_b
             data_ids_a[i] = data_id_a
             data_ids_b[i] = data_id_b
+
+            image_a = self.images[data_id_a].astype('float32') / 255.
+            mask_a = image_a[3, :, :].copy()
+            mask_a[mask_a >= 0.5] = 1
+            mask_a[mask_a < 0.5] = 0
+            # # dilated_a = ndimage.grey_dilation(mask_a, size=(10,10))
+            dilated_a = mask_a.copy()
+            # mask_inv_a = 1 - mask_a
+            # dist_a = ndimage.distance_transform_edt(mask_a)
+            # dist_inv_a = ndimage.distance_transform_edt(mask_inv_a)
+            # mask_a[dist_a==1] = 0
+            # dist_a = ndimage.distance_transform_edt(mask_a)
+            # dist_a = dist_a + dist_inv_a
+            # dist_a = np.array(dist_a).astype('float32')
+
+            image_b = self.images[data_id_b].astype('float32') / 255.
+            mask_b = image_b[3, :, :].copy()
+            mask_b[mask_b >= 0.5] = 1
+            mask_b[mask_b < 0.5] = 0
+            # dilated_b = ndimage.grey_dilation(mask_b, size=(10,10))
+            dilated_b = mask_b.copy()
+            # mask_inv_b = 1 - mask_b
+            # dist_b = ndimage.distance_transform_edt(mask_b)
+            # dist_inv_b = ndimage.distance_transform_edt(mask_inv_b)
+            # mask_b[dist_b==1] = 0
+            # dist_b = ndimage.distance_transform_edt(mask_b)
+            # dist_b = dist_b + dist_inv_b
+            # dist_b = np.array(dist_b).astype('float32')
+
+            # distances_a[i] = torch.from_numpy(dist_a)
+            # distances_b[i] = torch.from_numpy(dist_b)
+            masks_a[i] = torch.from_numpy(dilated_a)
+            masks_b[i] = torch.from_numpy(dilated_b)
+
             viewpoint_ids_a[i] = viewpoint_id_a
             viewpoint_ids_b[i] = viewpoint_id_b
 
@@ -85,7 +124,7 @@ class ShapeNet(object):
         viewpoints_a = srf.get_points_from_angles(distances, elevations_a, -viewpoint_ids_a * 15)
         viewpoints_b = srf.get_points_from_angles(distances, elevations_b, -viewpoint_ids_b * 15)
 
-        return images_a, images_b, viewpoints_a, viewpoints_b
+        return images_a, images_b, viewpoints_a, viewpoints_b, distances_a, distances_b, masks_a, masks_b
 
     def get_all_batches_for_evaluation(self, batch_size, class_id):
         data_ids = np.arange(self.num_data[class_id]) + self.pos[class_id]
@@ -100,3 +139,27 @@ class ShapeNet(object):
             images = torch.from_numpy(self.images[data_ids[i * batch_size:(i + 1) * batch_size]].astype('float32') / 255.)
             voxels = torch.from_numpy(self.voxels[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
             yield images, voxels
+
+    def get_one_model(self, model_id):
+        num_views = 24
+
+        data_ids = np.arange(num_views) + model_id * 24
+        distances = torch.ones(num_views).float() * self.distance
+        elevations = torch.ones(num_views).float() * self.elevation
+        viewpoints = -torch.from_numpy(np.arange(num_views)).float() * 15
+
+        images = self.images[data_ids].astype('float32') / 255.
+        masks = images[:, 3, :, :].copy()
+        masks[masks > 0] = 1
+        masks = 1 - masks
+        dists = []
+        for m in masks:
+            d = ndimage.distance_transform_edt(m)
+            dists.append(d)
+
+        dists = np.array(dists).astype('float32')
+
+        images = torch.from_numpy(images)
+        dists = torch.from_numpy(dists)
+        voxels = torch.from_numpy(self.voxels[data_ids // 24].astype('float32'))
+        return images, dists, voxels, distances, elevations, viewpoints
