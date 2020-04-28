@@ -63,11 +63,6 @@ class ShapeNet(object):
         data_ids_b = np.zeros(batch_size, 'int32')
         viewpoint_ids_a = torch.zeros(batch_size)
         viewpoint_ids_b = torch.zeros(batch_size)
-        distances_a = torch.zeros(batch_size, 64, 64)
-        distances_b = torch.zeros(batch_size, 64, 64)
-        masks_a = torch.zeros(batch_size, 64, 64)
-        masks_b = torch.zeros(batch_size, 64, 64)
-
         for i in range(batch_size):
             class_id = np.random.choice(self.class_ids)
             object_id = np.random.randint(0, self.num_data[class_id])
@@ -78,40 +73,6 @@ class ShapeNet(object):
             data_id_b = (object_id + self.pos[class_id]) * 24 + viewpoint_id_b
             data_ids_a[i] = data_id_a
             data_ids_b[i] = data_id_b
-
-            image_a = self.images[data_id_a].astype('float32') / 255.
-            mask_a = image_a[3, :, :].copy()
-            mask_a[mask_a >= 0.5] = 1
-            mask_a[mask_a < 0.5] = 0
-            # # dilated_a = ndimage.grey_dilation(mask_a, size=(10,10))
-            dilated_a = mask_a.copy()
-            # mask_inv_a = 1 - mask_a
-            # dist_a = ndimage.distance_transform_edt(mask_a)
-            # dist_inv_a = ndimage.distance_transform_edt(mask_inv_a)
-            # mask_a[dist_a==1] = 0
-            # dist_a = ndimage.distance_transform_edt(mask_a)
-            # dist_a = dist_a + dist_inv_a
-            # dist_a = np.array(dist_a).astype('float32')
-
-            image_b = self.images[data_id_b].astype('float32') / 255.
-            mask_b = image_b[3, :, :].copy()
-            mask_b[mask_b >= 0.5] = 1
-            mask_b[mask_b < 0.5] = 0
-            # dilated_b = ndimage.grey_dilation(mask_b, size=(10,10))
-            dilated_b = mask_b.copy()
-            # mask_inv_b = 1 - mask_b
-            # dist_b = ndimage.distance_transform_edt(mask_b)
-            # dist_inv_b = ndimage.distance_transform_edt(mask_inv_b)
-            # mask_b[dist_b==1] = 0
-            # dist_b = ndimage.distance_transform_edt(mask_b)
-            # dist_b = dist_b + dist_inv_b
-            # dist_b = np.array(dist_b).astype('float32')
-
-            # distances_a[i] = torch.from_numpy(dist_a)
-            # distances_b[i] = torch.from_numpy(dist_b)
-            masks_a[i] = torch.from_numpy(dilated_a)
-            masks_b[i] = torch.from_numpy(dilated_b)
-
             viewpoint_ids_a[i] = viewpoint_id_a
             viewpoint_ids_b[i] = viewpoint_id_b
 
@@ -124,7 +85,7 @@ class ShapeNet(object):
         viewpoints_a = srf.get_points_from_angles(distances, elevations_a, -viewpoint_ids_a * 15)
         viewpoints_b = srf.get_points_from_angles(distances, elevations_b, -viewpoint_ids_b * 15)
 
-        return images_a, images_b, viewpoints_a, viewpoints_b, distances_a, distances_b, masks_a, masks_b
+        return images_a, images_b, viewpoints_a, viewpoints_b
 
     def get_all_batches_for_evaluation(self, batch_size, class_id):
         data_ids = np.arange(self.num_data[class_id]) + self.pos[class_id]

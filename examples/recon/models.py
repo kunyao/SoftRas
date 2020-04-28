@@ -93,7 +93,7 @@ class Model(nn.Module):
 
         self.encoder = Encoder(im_size=args.image_size)
         self.decoder = Decoder(filename_obj)
-        self.renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=args.sigma_val, 
+        self.renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=args.sigma_val,
                                         aggr_func_rgb='hard', camera_mode='look_at', viewing_angle=15,
                                         dist_eps=1e-10)
         self.laplacian_loss = sr.LaplacianLoss(self.decoder.vertices_base, self.decoder.faces)
@@ -109,6 +109,30 @@ class Model(nn.Module):
         vertices, faces = self.decoder(self.encoder(images))
         return vertices, faces
 
+    def get_area(self, face_vertices, mode=0):
+
+        v0 = face_vertices[:,:,0,:].clone()
+        v1 = face_vertices[:,:,1,:].clone()
+        v2 = face_vertices[:,:,2,:].clone()
+
+        if mode==1:
+            v0[:,:,2] = 0
+            v1[:,:,2] = 0
+            v2[:,:,2] = 0
+        area = torch.norm(torch.cross((v0 - v1), (v0 - v2)), dim=2)
+
+        return area
+
+    def area_loss(self, vertices, faces):
+        fv = srf.face_vertices(vertices, faces)
+        area = self.get_area(fv)
+        return area.sum(1)
+
+    def len_loss(self, vertices, faces):
+        fv = srf.face_vertices(vertices, faces)
+        length = self.get_len(fv)
+        return length.sum(1)
+
     def predict_multiview(self, image_a, image_b, viewpoint_a, viewpoint_b):
         batch_size = image_a.size(0)
         # [Ia, Ib]
@@ -116,10 +140,12 @@ class Model(nn.Module):
         # [Va, Va, Vb, Vb], set viewpoints
         viewpoints = torch.cat((viewpoint_a, viewpoint_a, viewpoint_b, viewpoint_b), dim=0)
         self.renderer.transform.set_eyes(viewpoints)
+        self.renderer.transform2.set_eyes(viewpoints)
 
         vertices, faces = self.reconstruct(images)
         laplacian_loss = self.laplacian_loss(vertices)
         flatten_loss = self.flatten_loss(vertices)
+        area_loss = self.area_loss(vertices, faces)
 
         # [Ma, Mb, Ma, Mb]
         vertices = torch.cat((vertices, vertices), dim=0)
@@ -127,7 +153,7 @@ class Model(nn.Module):
 
         # [Raa, Rba, Rab, Rbb], cross render multiview images
         silhouettes = self.renderer(vertices, faces)
-        return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss
+        return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss
 
     def evaluate_iou(self, images, voxels):
         vertices, faces = self.reconstruct(images)

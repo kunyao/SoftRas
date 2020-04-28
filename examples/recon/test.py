@@ -59,6 +59,28 @@ os.makedirs(directory_output, exist_ok=True)
 directory_mesh = os.path.join(directory_output, args.experiment_id)
 os.makedirs(directory_mesh, exist_ok=True)
 
+def save_obj(filename, vertices, faces=[]):
+    """
+    Args:
+        vertices: N*3 np.array
+        faces: M*3 np.array
+    """
+
+    with open(filename, 'w') as fp:
+        for v in vertices:
+            fp.write('v {:.3} {:.3} {:.3}\n'.format(*v))
+        for f in faces:
+            fp.write('f {} {} {}\n'.format(*(f + 1)))
+
+def save_voxel(filename, voxel):
+    vertices = []
+    for i in range(voxel.shape[0]):
+        for j in range(voxel.shape[1]):
+            for k in range(voxel.shape[2]):
+                if voxel[i, j, k] == 1:
+                    vertices.append([j / voxel.shape[0] - 0.5, i / voxel.shape[1] - 0.5, 0.5 - k / voxel.shape[2]])
+
+    save_obj(filename, vertices)
 
 def test():
     end = time.time()
@@ -75,14 +97,14 @@ def test():
         directory_mesh_cls = os.path.join(directory_mesh, class_id)
         os.makedirs(directory_mesh_cls, exist_ok=True)
         iou = 0
-        
+
         for i, (im, vx) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
             images = torch.autograd.Variable(im).cuda()
             voxels = vx.numpy()
 
             batch_iou, vertices, faces = model(images, voxels=voxels, task='test')
             iou += batch_iou.sum()
-            
+
             batch_time.update(time.time() - end)
             end = time.time()
 
@@ -99,7 +121,7 @@ def test():
             if i % args.print_freq == 0:
                 print('Iter: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f}\t'
-                      'IoU {2:.3f}\t'.format(i, ((dataset_val.num_data[class_id] * 24) // args.batch_size), 
+                      'IoU {2:.3f}\t'.format(i, ((dataset_val.num_data[class_id] * 24) // args.batch_size),
                                              batch_iou.mean(),
                                              batch_time=batch_time))
 

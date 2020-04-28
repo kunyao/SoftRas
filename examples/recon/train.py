@@ -75,6 +75,7 @@ os.makedirs(image_output, exist_ok=True)
 
 # setup model & optimizer
 model = models.Model('data/obj/sphere/sphere_642.obj', args=args)
+# model = models.Model('data/obj/box.obj', args=args)
 model = model.cuda()
 
 optimizer = torch.optim.Adam(model.model_param(), args.learning_rate)
@@ -95,41 +96,34 @@ def train():
     data_time = AverageMeter()
     losses = AverageMeter()
 
-    model.renderer.set_distance_map(args.batch_size)
     for i in range(start_iter, args.num_iterations + 1):
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
-        model.renderer.set_beta(adjust_beta(i))
-        # model.renderer.set_win_size(adjust_win_size(i))
-        model.renderer.set_alpha(5.0)
 
         # load images from multi-view
-        images_a, images_b, viewpoints_a, viewpoints_b, distances_a, distances_b, masks_a, masks_b = dataset_train.get_random_batch(args.batch_size)
+        images_a, images_b, viewpoints_a, viewpoints_b = dataset_train.get_random_batch(args.batch_size)
         images_a = images_a.cuda()
         images_b = images_b.cuda()
         viewpoints_a = viewpoints_a.cuda()
         viewpoints_b = viewpoints_b.cuda()
-        distances_a = distances_a.cuda()
-        distances_b = distances_b.cuda()
-        masks_a = masks_a.cuda()
-        masks_b = masks_b.cuda()
-        distances_all = torch.cat((distances_a, distances_a, distances_b, distances_b), dim=0)
-        model.renderer.set_distance_map(0, distance_map=distances_all)
+        masks_a = images_a[:,3]
+        masks_b = images_b[:,3]
 
         # soft render images
-        render_images, laplacian_loss, flatten_loss = model([images_a, images_b],
+        render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
                                                             task='train')
         laplacian_loss = laplacian_loss.mean()
         flatten_loss = flatten_loss.mean()
+        area_loss = area_loss.mean()
 
         # compute loss
-        # loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, images_a, images_b)
-        loss0, loss1, loss2, loss3, loss4, loss5 = multiview_iou_loss(render_images, masks_a, masks_b)
+        loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
         loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
                args.lambda_laplacian * laplacian_loss + \
                args.lambda_flatten * flatten_loss
+               # 1e-4 * area_loss
         losses.update(loss.data.item(), images_a.size(0))
 
         # compute gradient and optimize
@@ -153,12 +147,13 @@ def train():
             demo_image = images_a[0:1]
             demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
             demo_v, demo_f = model.reconstruct(demo_image)
+            torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
             render_out = render_images[0][:, 3].detach()
             # gt_out = images_a[:,3].detach()
             gt_out = masks_a.detach()
-            gt_out[gt_out > 0.0] = 1.0
+            # gt_out[gt_out < 1.0] = 0.0
             # render_out[render_out > 0.5] = 1.0
             render_out[render_out < 1.0] = 0.0
             image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
@@ -174,7 +169,7 @@ def train():
                   'lr {lr:.6f}\t'
                   'sv {sv:.6f}\t'.format(i, args.num_iterations,
                                          batch_time=batch_time,
-                                         loss0=loss4.data, loss1=loss5.data,
+                                         loss0=loss0.data, loss1=loss1.data,
                                          lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
             with open(os.path.join(directory_output, 'training_loss.txt'), 'a') as f:
@@ -185,14 +180,15 @@ def train():
                       'lr {lr:.6f}\t'
                       'sv {sv:.6f}\n'.format(i, args.num_iterations,
                                              batch_time=batch_time,
-                                             loss0=loss4.data, loss1=loss5.data,
+                                             loss0=loss0.data, loss1=loss1.data,
                                              lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
 
 def adjust_learning_rate(optimizers, learning_rate, i, method):
     if method == 'step':
         lr, decay = learning_rate, 0.3
-        if i >= 150000:
+        # if i >= 150000:
+        if i >= 50000:
             lr *= decay
     elif method == 'constant':
         lr = learning_rate
@@ -213,7 +209,7 @@ def adjust_sigma(sigma, i):
 
 def adjust_beta(i):
     if i < 1000:
-        return 0
+        return 1
     elif i < 2000:
         return 0
     elif i < 4000:
