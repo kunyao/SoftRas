@@ -84,6 +84,7 @@ class SoftRenderer(nn.Module):
                                             sigma_val, dist_func, dist_eps,
                                             gamma_val, aggr_func_rgb, aggr_func_alpha,
                                             texture_type)
+        self.image_size = image_size
         self.set_alpha()
         self.set_win_size()
         self.set_beta()
@@ -125,7 +126,7 @@ class SoftRenderer(nn.Module):
 
     def render_mesh(self, mesh,  mode=None):
         self.set_texture_mode(mesh.texture_type)
-        mesh = self.lighting(mesh)
+        # mesh = self.lighting(mesh)
         mesh_copy = sr.Mesh(mesh.vertices, mesh.faces)
 
         area_3d = self.get_area(mesh_copy)
@@ -133,8 +134,9 @@ class SoftRenderer(nn.Module):
         area_2d = self.get_area(mesh_copy, 1)
 
         mesh = self.transform(mesh)
-        # return self.rasterizer(mesh, mode)
-        return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, 3.0, 8.0, 8.0)[:, None, :, :].repeat(1, 4, 1, 1)
+        # img = self.rasterizer(mesh, mode)
+        img = FragmentRasterize.apply(mesh.face_vertices, mesh.textures, mesh.texture_res, area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
+        return img
 
     def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface'):
         mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)

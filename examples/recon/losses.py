@@ -41,3 +41,13 @@ def multiview_iou_loss(predicts, targets_a, targets_b):
     # loss5 = iou_loss(hard1[:, 3], targets_a)
 
     return loss0, loss1, loss2, loss3
+
+def multiview_rgb_loss(predicts, targets_a, targets_b):
+
+    mse = nn.MSELoss()
+    loss0 = mse(predicts[0][:, :3], targets_a[:, :3])
+    loss1 = mse(predicts[1][:, :3], targets_a[:, :3])
+    loss2 = mse(predicts[2][:, :3], targets_b[:, :3])
+    loss3 = mse(predicts[3][:, :3], targets_b[:, :3])
+
+    return (loss0 + loss1 + loss2 + loss3) / 4

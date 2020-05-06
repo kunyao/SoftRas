@@ -4,6 +4,7 @@ import torch
 import torchvision
 import numpy as np
 from losses import multiview_iou_loss
+from losses import multiview_rgb_loss
 from utils import AverageMeter, img_cvt
 import soft_renderer as sr
 import soft_renderer.functional as srf
@@ -107,8 +108,8 @@ def train():
         images_b = images_b.cuda()
         viewpoints_a = viewpoints_a.cuda()
         viewpoints_b = viewpoints_b.cuda()
-        masks_a = images_a[:,3]
-        masks_b = images_b[:,3]
+        masks_a = images_a[:, 3]
+        masks_b = images_b[:, 3]
 
         # soft render images
         render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
@@ -120,10 +121,13 @@ def train():
 
         # compute loss
         loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
+        rgb_loss = multiview_rgb_loss(render_images, images_a, images_b)
         loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
                args.lambda_laplacian * laplacian_loss + \
+               100 * rgb_loss + \
                args.lambda_flatten * flatten_loss
                # 1e-4 * area_loss
+
         losses.update(loss.data.item(), images_a.size(0))
 
         # compute gradient and optimize
@@ -146,7 +150,7 @@ def train():
         if i % args.demo_freq == 0:
             demo_image = images_a[0:1]
             demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
-            demo_v, demo_f = model.reconstruct(demo_image)
+            demo_v, demo_f, demo_t = model.reconstruct(demo_image)
             torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
@@ -157,7 +161,12 @@ def train():
             # render_out[render_out > 0.5] = 1.0
             render_out[render_out < 1.0] = 0.0
             image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
-            torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_out.png' % i))
+            torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_mask.png' % i))
+
+            render_out = render_images[0].detach()
+            gt_out = images_a.detach()
+            torchvision.utils.save_image(render_out[:, :3], os.path.join(image_output, '%07d_recon.png' % i))
+            torchvision.utils.save_image(gt_out[:, :3], os.path.join(image_output, '%07d_gt.png' % i))
 
 
         # print
@@ -166,10 +175,11 @@ def train():
                   'Time {batch_time.val:.3f}\t'
                   'Loss0 {loss0:.3f}\t'
                   'Loss1 {loss1:.3f}\t'
+                  'Loss_rgb {loss2:.3f}\t'
                   'lr {lr:.6f}\t'
                   'sv {sv:.6f}\t'.format(i, args.num_iterations,
                                          batch_time=batch_time,
-                                         loss0=loss0.data, loss1=loss1.data,
+                                         loss0=loss0.data, loss1=loss1.data, loss2=rgb_loss.data,
                                          lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
             with open(os.path.join(directory_output, 'training_loss.txt'), 'a') as f:
