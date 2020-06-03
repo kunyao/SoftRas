@@ -135,9 +135,9 @@ class SoftRenderer(nn.Module):
 
         mesh = self.transform(mesh)
         # img = self.rasterizer(mesh, mode)
-        img = FragmentRasterize.apply(mesh.face_vertices, mesh.textures, mesh.texture_res, area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
+        img = FragmentRasterize.apply(mesh.face_vertices, mesh.uvs, mesh.texture_maps, mesh.textures, mesh.texture_maps.shape[2], area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
         return img
 
-    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface'):
-        mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)
+    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', uvs=None, texture_maps=None):
+        mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type, uvs=uvs, texture_maps=texture_maps)
         return self.render_mesh(mesh, mode)

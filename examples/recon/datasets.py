@@ -33,6 +33,8 @@ class ShapeNet(object):
 
         images = []
         voxels = []
+        vertices = []
+        faces = []
         self.num_data = {}
         self.pos = {}
         count = 0
@@ -43,15 +45,25 @@ class ShapeNet(object):
                 os.path.join(directory, '%s_%s_images.npz' % (class_id, set_name))).items())[0][1])
             voxels.append(list(np.load(
                 os.path.join(directory, '%s_%s_voxels.npz' % (class_id, set_name))).items())[0][1])
+            vertices.append(np.load(
+                os.path.join(directory, '%s_%s_meshes.npz' % (class_id, set_name)))['v'])
+            faces.append(np.load(
+                os.path.join(directory, '%s_%s_meshes.npz' % (class_id, set_name)))['f'])
+
             self.num_data[class_id] = images[-1].shape[0]
             self.pos[class_id] = count
             count += self.num_data[class_id]
+
         images = np.concatenate(images, axis=0).reshape((-1, 4, 64, 64))
         images = np.ascontiguousarray(images)
         self.images = images
         self.voxels = np.ascontiguousarray(np.concatenate(voxels, axis=0))
+        self.vertices = np.ascontiguousarray(np.concatenate(vertices, axis=0))
+        self.faces = np.ascontiguousarray(np.concatenate(faces, axis=0))
         del images
         del voxels
+        del vertices
+        del faces
 
     @property
     def class_ids_pair(self):
@@ -61,6 +73,7 @@ class ShapeNet(object):
     def get_random_batch(self, batch_size):
         data_ids_a = np.zeros(batch_size, 'int32')
         data_ids_b = np.zeros(batch_size, 'int32')
+        object_global_id = np.zeros(batch_size, 'int32')
         viewpoint_ids_a = torch.zeros(batch_size)
         viewpoint_ids_b = torch.zeros(batch_size)
         for i in range(batch_size):
@@ -73,6 +86,7 @@ class ShapeNet(object):
             data_id_b = (object_id + self.pos[class_id]) * 24 + viewpoint_id_b
             data_ids_a[i] = data_id_a
             data_ids_b[i] = data_id_b
+            object_global_id[i] = object_id + self.pos[class_id]
             viewpoint_ids_a[i] = viewpoint_id_a
             viewpoint_ids_b[i] = viewpoint_id_b
 
@@ -85,7 +99,10 @@ class ShapeNet(object):
         viewpoints_a = srf.get_points_from_angles(distances, elevations_a, -viewpoint_ids_a * 15)
         viewpoints_b = srf.get_points_from_angles(distances, elevations_b, -viewpoint_ids_b * 15)
 
-        return images_a, images_b, viewpoints_a, viewpoints_b
+        vertices_batch = torch.from_numpy(self.vertices[object_global_id].astype('float32'))
+        faces_batch = torch.from_numpy(self.faces[object_global_id].astype('float32'))
+
+        return images_a, images_b, viewpoints_a, viewpoints_b, vertices_batch, faces_batch
 
     def get_all_batches_for_evaluation(self, batch_size, class_id):
         data_ids = np.arange(self.num_data[class_id]) + self.pos[class_id]

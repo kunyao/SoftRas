@@ -68,6 +68,7 @@ def load_textures(filename_obj, filename_mtl, texture_res):
     faces = vertices[faces]
     faces = torch.from_numpy(faces).cuda()
     faces[1 < faces] = faces[1 < faces] % 1
+    uv = faces.clone()
 
     colors, texture_filenames = load_mtl(filename_mtl)
 
@@ -98,7 +99,7 @@ def load_textures(filename_obj, filename_mtl, texture_res):
         is_update = (np.array(material_names) == material_name).astype(np.int32)
         is_update = torch.from_numpy(is_update).cuda()
         textures = load_textures_cuda.load_textures(image, faces, textures, is_update)
-    return textures
+    return textures, uv, image
 
 
 def load_obj(filename_obj, normalization=False, load_texture=False, texture_res=4, texture_type='surface'):
@@ -142,7 +143,7 @@ def load_obj(filename_obj, normalization=False, load_texture=False, texture_res=
         for line in lines:
             if line.startswith('mtllib'):
                 filename_mtl = os.path.join(os.path.dirname(filename_obj), line.split()[1])
-                textures = load_textures(filename_obj, filename_mtl, texture_res)
+                textures, uv, texture_map = load_textures(filename_obj, filename_mtl, texture_res)
         if textures is None:
             raise Exception('Failed to load textures.')
     elif load_texture and texture_type == 'vertex':
@@ -162,6 +163,6 @@ def load_obj(filename_obj, normalization=False, load_texture=False, texture_res=
         vertices -= vertices.max(0)[0][None, :] / 2
 
     if load_texture:
-        return vertices, faces, textures
+        return vertices, faces, textures, uv, texture_map
     else:
         return vertices, faces

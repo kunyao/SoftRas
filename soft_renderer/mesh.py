@@ -5,12 +5,29 @@ import numpy as np
 
 import soft_renderer.functional as srf
 
+def get_uv(vertices):
+    x = vertices[:, 0]
+    y = vertices[:, 1]
+    z = vertices[:, 2]
+    r = (x ** 2 + y ** 2 + z ** 2) ** 0.5
+    la = torch.asin(y / r)                 # [-pi/2, pi/2]
+    lo = torch.zeros_like(la)        # [-pi, pi]
+    phase0 = z>0
+    lo[phase0] = torch.atan(x[phase0] / z[phase0])
+    phase1 = (z<0) & (x<0)
+    lo[phase1] = torch.atan(x[phase1] / z[phase1]) - np.pi
+    phase2 = (z<0) & (x>0)
+    lo[phase2] = torch.atan(x[phase2] / z[phase2]) + np.pi
+    la = (la + np.pi / 2) / np.pi
+    lo = (lo + np.pi) / np.pi / 2
+
+    return torch.stack([lo, la]).permute(1, 0)
 
 class Mesh(object):
     '''
     A simple class for creating and manipulating trimesh objects
     '''
-    def __init__(self, vertices, faces, textures=None, texture_res=1, texture_type='surface'):
+    def __init__(self, vertices, faces, textures=None, texture_res=1, texture_type='surface', uvs=None, texture_maps=None):
         '''
         vertices, faces and textures(if not None) are expected to be Tensor objects
         '''
@@ -42,14 +59,17 @@ class Mesh(object):
 
         self._fill_back = False
 
+        self.uvs = uvs
+        self.texture_maps = texture_maps
+
         # create textures
         if textures is None:
             if texture_type == 'surface':
-                self._textures = torch.ones(self.batch_size, self.num_faces, texture_res**2, 3, 
+                self._textures = torch.ones(self.batch_size, self.num_faces, texture_res**2, 3,
                                             dtype=torch.float32).to(self.device)
                 self.texture_res = texture_res
             elif texture_type == 'vertex':
-                self._textures = torch.ones(self.batch_size, self.num_vertices, 3, 
+                self._textures = torch.ones(self.batch_size, self.num_vertices, 3,
                                             dtype=torch.float32).to(self.device)
                 self.texture_res = 1
         else:
@@ -144,31 +164,37 @@ class Mesh(object):
         self.faces = self._origin_faces
         self.textures = self._origin_textures
         self._fill_back = False
-    
+
+
+
     @classmethod
     def from_obj(cls, filename_obj, normalization=False, load_texture=False, texture_res=1, texture_type='surface'):
         '''
         Create a Mesh object from a .obj file
         '''
         if load_texture:
-            vertices, faces, textures = srf.load_obj(filename_obj,
+            vertices, faces, textures, uv, texture_map = srf.load_obj(filename_obj,
                                                      normalization=normalization,
                                                      texture_res=texture_res,
                                                      load_texture=True,
                                                      texture_type=texture_type)
+            return cls(vertices, faces, textures, texture_res, texture_type, uvs=uv[None,:], texture_maps=texture_map[None,:])
+
         else:
             vertices, faces = srf.load_obj(filename_obj,
                                            normalization=normalization,
                                            texture_res=texture_res,
                                            load_texture=False)
             textures = None
-        return cls(vertices, faces, textures, texture_res, texture_type)
+            uvs = get_uv(vertices)
+            uvs = srf.face_vertices(uvs[None, :], faces[None, :])
+            return cls(vertices, faces, textures, texture_res, texture_type, uvs=uvs)
 
     def save_obj(self, filename_obj, save_texture=False, texture_res_out=16):
         if self.batch_size != 1:
             raise ValueError('Could not save when batch size >= 1')
         if save_texture:
-            srf.save_obj(filename_obj, self.vertices[0], self.faces[0], 
+            srf.save_obj(filename_obj, self.vertices[0], self.faces[0],
                          textures=self.textures[0],
                          texture_res=texture_res_out, texture_type=self.texture_type)
         else:

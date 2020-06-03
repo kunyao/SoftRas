@@ -91,6 +91,16 @@ if args.resume_path:
 
 dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train')
 
+def eval_bn(m):
+    classname = m.__class__.__name__
+    if classname.find('BatchNorm') != -1:
+        m.eval()
+
+def train_bn(m):
+    classname = m.__class__.__name__
+    if classname.find('BatchNorm') != -1:
+        m.train()
+
 def train():
     end = time.time()
     batch_time = AverageMeter()
@@ -103,7 +113,12 @@ def train():
         model.set_sigma(adjust_sigma(args.sigma_val, i))
 
         # load images from multi-view
-        images_a, images_b, viewpoints_a, viewpoints_b = dataset_train.get_random_batch(args.batch_size)
+        images_a, images_b, viewpoints_a, viewpoints_b, vertices, faces = dataset_train.get_random_batch(args.batch_size)
+        vertices = vertices.cuda()
+        tmp = vertices[:,:,0].clone()
+        vertices[:,:,0] = -vertices[:,:,2]
+        vertices[:,:,2] = -tmp
+        faces = faces.cuda().int()
         images_a = images_a.cuda()
         images_b = images_b.cuda()
         viewpoints_a = viewpoints_a.cuda()
@@ -114,19 +129,21 @@ def train():
         # soft render images
         render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
+                                                            vertices, faces,
                                                             task='train')
-        laplacian_loss = laplacian_loss.mean()
+        # laplacian_loss = laplacian_loss.mean()
         flatten_loss = flatten_loss.mean()
         area_loss = area_loss.mean()
 
         # compute loss
         loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
         rgb_loss = multiview_rgb_loss(render_images, images_a, images_b)
-        loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
-               args.lambda_laplacian * laplacian_loss + \
-               100 * rgb_loss + \
-               args.lambda_flatten * flatten_loss
-               # 1e-4 * area_loss
+        # loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
+               # args.lambda_laplacian * laplacian_loss + \
+               # 100 * rgb_loss + \
+               # args.lambda_flatten * flatten_loss
+               # # 1e-4 * area_loss
+        loss = (loss0 + loss1 + loss2 + loss3) / 4
 
         losses.update(loss.data.item(), images_a.size(0))
 
@@ -149,10 +166,15 @@ def train():
         # save demo images
         if i % args.demo_freq == 0:
             demo_image = images_a[0:1]
-            demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
-            demo_v, demo_f, demo_t = model.reconstruct(demo_image)
+            demo_path_before = os.path.join(directory_output, 'demo_%07d_before.obj'%i)
+            demo_path_after = os.path.join(directory_output, 'demo_%07d_after.obj'%i)
+            model.apply(eval_bn)
+            demo_v, demo_f, demo_uv, demo_t = model.reconstruct(demo_image, vertices[0][None,:], faces[0][None,:])
+            model.apply(train_bn)
+            torchvision.utils.save_image(demo_t.permute(0, 3, 1, 2), os.path.join(directory_output, '%07d_texture.png' % i))
             torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
-            srf.save_obj(demo_path, demo_v[0], demo_f[0])
+            srf.save_obj(demo_path_before, vertices[0], faces[0])
+            srf.save_obj(demo_path_after, demo_v[0], demo_f[0])
 
             render_out = render_images[0][:, 3].detach()
             # gt_out = images_a[:,3].detach()
