@@ -133,7 +133,9 @@ class Model(nn.Module):
                                         aggr_func_rgb='hard', camera_mode='look_at', viewing_angle=15,
                                         dist_eps=1e-10)
         # self.laplacian_loss = sr.LaplacianLoss(self.vertices_base, self.faces)
+        self.laplacian_loss = sr.LaplacianLossBatch(True)
         # self.flatten_loss = sr.FlattenLoss(self.faces)
+        # self.flatten_loss = sr.FlattenLossBatch()
 
     def model_param(self):
         return list(self.encoder.parameters()) + list(self.decoder.parameters())
@@ -191,9 +193,9 @@ class Model(nn.Module):
         vertices = torch.cat((vertices, vertices), dim=0)
         faces = torch.cat((faces, faces), dim=0)
         vertices, faces, uvs, texture_maps = self.reconstruct(images, vertices, faces)
-        # laplacian_loss = self.laplacian_loss(vertices)
-        laplacian_loss = torch.zeros([])
-        # flatten_loss = self.flatten_loss(vertices)
+        laplacian_loss = self.laplacian_loss(vertices, faces)
+        # laplacian_loss = torch.zeros([])
+        # flatten_loss = self.flatten_loss(vertices, faces)
         flatten_loss = torch.zeros([])
         # area_loss = self.area_loss(vertices, faces)
         area_loss = torch.zeros([])

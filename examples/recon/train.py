@@ -138,12 +138,12 @@ def train():
         # compute loss
         loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
         rgb_loss = multiview_rgb_loss(render_images, images_a, images_b)
-        # loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
-               # args.lambda_laplacian * laplacian_loss + \
+        loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
+               args.lambda_laplacian * laplacian_loss + \
+               args.lambda_flatten * flatten_loss
                # 100 * rgb_loss + \
-               # args.lambda_flatten * flatten_loss
                # # 1e-4 * area_loss
-        loss = (loss0 + loss1 + loss2 + loss3) / 4
+        # loss = (loss0 + loss1 + loss2 + loss3) / 4
 
         losses.update(loss.data.item(), images_a.size(0))
 
