@@ -27,5 +27,9 @@ def projection(vertices, P, dist_coeffs, orig_size):
     y__ = y_*(1 + k1*(r**2) + k2*(r**4) + k3 *(r**6)) + p1*(r**2 + 2*y_**2) + 2*p2*x_*y_
     x__ = 2 * (x__ - orig_size / 2.) / orig_size
     y__ = 2 * (y__ - orig_size / 2.) / orig_size
+
+    ''' For normalized screen coordinate
     vertices = torch.stack([x__,y__,z], dim=-1)
+    '''
+    vertices = torch.stack([x_,y_,z], dim=-1)
     return vertices

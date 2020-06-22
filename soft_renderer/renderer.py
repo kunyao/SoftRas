@@ -125,6 +125,9 @@ class SoftRenderer(nn.Module):
         return area
 
     def render_mesh(self, mesh,  mode=None):
+        '''
+        screen space coords: x: [-1,1] y: [-1,1] z: [0,inf]
+        '''
         self.set_texture_mode(mesh.texture_type)
         # mesh = self.lighting(mesh)
         mesh_copy = sr.Mesh(mesh.vertices, mesh.faces)
@@ -134,6 +137,7 @@ class SoftRenderer(nn.Module):
         area_2d = self.get_area(mesh_copy, 1)
 
         mesh = self.transform(mesh)
+        mesh.vertices[:, :, 1] = -mesh.vertices[:, :, 1]  # used in non-softras camera config
         img = self.rasterizer(mesh, mode)
         # img = FragmentRasterize.apply(mesh.face_vertices, mesh.uvs, mesh.texture_maps, mesh.textures, mesh.texture_maps.shape[2], area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
         return img
