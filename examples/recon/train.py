@@ -144,7 +144,9 @@ def train():
 
         # save demo images
         if i % args.demo_freq == 0:
-            demo_image = images_a[0:1]
+            # demo_image = images_a[0:1]  # first image in training batch
+            demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_train.get_one_model(5) #
+            demo_image = demo_image.cuda()
             demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
             demo_v, demo_f = model.reconstruct(demo_image)
             torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
