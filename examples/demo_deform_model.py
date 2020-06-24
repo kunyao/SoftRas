@@ -22,11 +22,12 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 data_dir = os.path.join(current_dir, '../data')
 
 dataset_directory = './data/datasets'
-class_ids = '02691156'
+class_ids = '02828884'
+set_select = 'train'
 # class_ids = (
     # '02691156,02828884,02933112,02958343,03001627,03211117,03636649,' +
     # '03691459,04090263,04256520,04379243,04401088,04530566')
-dataset_val = datasets.ShapeNet(dataset_directory, class_ids.split(','), 'val')
+dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), set_select)
 
 class Model(nn.Module):
     def __init__(self, template_path):
@@ -110,7 +111,6 @@ def main():
         default=os.path.join(data_dir, 'camera.npy'))
     parser.add_argument('-t', '--template-mesh', type=str,
         default=os.path.join(data_dir, 'obj/sphere/sphere_1352.obj'))
-        # default=os.path.join(data_dir, 'results/output_deform2/plane00500.obj'))
     parser.add_argument('-o', '--output-dir', type=str,
         default=os.path.join(data_dir, 'results/output_deform3'))
     parser.add_argument('-b', '--batch-size', type=int,
@@ -124,69 +124,35 @@ def main():
                                camera_mode='look_at', viewing_angle=15)
 
     # read training images and camera poses
-    # images = np.load(args.filename_input).astype('float32') / 255.
-    images_gt, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_val.get_one_model(5)
+    images_gt, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset.get_one_model(4)
     voxel = voxel.numpy()
     images_gt = images_gt.cuda()
     dist_maps = dist_maps.cuda()
-    # images_gt[images_gt >= 0.5] = 1.0
-    # images_gt[images_gt < 0.5] = 0.0
+    ''' Uncomment for hard boundary
+    images_gt[images_gt >= 0.5] = 1.0
+    images_gt[images_gt < 0.5] = 0.0
+    '''
+
+    ''' Uncomment for viewpoints slection
     images_gt = images_gt[0:24,:]
     dist_maps = dist_maps[0:24,:]
     camera_distances = camera_distances[0:24]
     elevations = elevations[0:24]
     viewpoints = viewpoints[0:24]
+    '''
 
-    # cameras = np.load(args.camera_input).astype('float32')
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
 
-    # camera_distances = torch.from_numpy(cameras[:, 0])
-    # elevations = torch.from_numpy(cameras[:, 1])
-    # viewpoints = torch.from_numpy(cameras[:, 2])
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
-    loop = tqdm.tqdm(list(range(0, 1001)))
+    loop = tqdm.tqdm(list(range(0, 201)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
 
-    # images_gt[images_gt < 0.00] = 0.0
 
     for i in loop:
-        # images_gt = torch.from_numpy(images).cuda()
-
-        # win_size = 1
-        # alpha = 1.0
-        # if i < 100:
-            # renderer.set_beta(6)
-        # elif i < 200:
-            # renderer.set_beta(5)
-        # elif i < 300:
-            # renderer.set_beta(4)
-        # elif i < 500:
-            # renderer.set_beta(3)
-        # elif i < 700:
-            # renderer.set_beta(2)
-        # elif i < 900:
-            # renderer.set_beta(1)
-        # else:
-            # renderer.set_beta(0)
-        # elif i < 1100:
-            # win_size = 5
-            # alpha = 2.5
-        # elif i < 1200:
-            # win_size = 3
-            # alpha = 1.5
-        # elif i < 1300:
-            # win_size = 1
-            # alpha = 1.0
-
-        # beta = 0
         mesh, laplacian_loss, flatten_loss = model(24)
         iou3D, voxels_predict = iou_3d(mesh.face_vertices, voxel)
         print(iou3D)
-        # renderer.set_alpha(alpha)
-        # renderer.set_beta(beta)
-        # renderer.set_win_size(win_size)
-        renderer.set_distance_map(24, dist_maps)
         images_pred = renderer.render_mesh(mesh)
 
         # optimize mesh with silhouette reprojection error and
@@ -196,8 +162,8 @@ def main():
                0.0003 * flatten_loss
 
         images_hard = images_pred.clone()
-        images_hard[images_hard < 0.99] = 0
-        images_hard[images_hard >= 0.99] = 1.0
+        # images_hard[images_hard < 0.99] = 0
+        # images_hard[images_hard >= 0.99] = 1.0
         hard_iou = neg_iou_loss(images_hard[:, 3], images_gt[:, 3])
         loop.set_description('Loss: %.4f'%(hard_iou.item()))
 
