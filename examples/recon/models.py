@@ -98,6 +98,7 @@ class Model(nn.Module):
                                         dist_eps=1e-10)
         self.laplacian_loss = sr.LaplacianLoss(self.decoder.vertices_base, self.decoder.faces)
         self.flatten_loss = sr.FlattenLoss(self.decoder.faces)
+        self.use_soft = args.use_soft  # A flag to switch between softRas and ours
 
     def model_param(self):
         return list(self.encoder.parameters()) + list(self.decoder.parameters())
@@ -152,7 +153,7 @@ class Model(nn.Module):
         faces = torch.cat((faces, faces), dim=0)
 
         # [Raa, Rba, Rab, Rbb], cross render multiview images
-        silhouettes = self.renderer(vertices, faces)
+        silhouettes = self.renderer(vertices, faces, use_soft=self.use_soft)  # call render_mesh in forward()
         return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss
 
     def evaluate_iou(self, images, voxels):

@@ -123,7 +123,7 @@ class SoftRenderer(nn.Module):
 
         return area
 
-    def render_mesh(self, mesh,  mode=None):
+    def render_mesh(self, mesh,  mode=None, use_soft=False):
         self.set_texture_mode(mesh.texture_type)
         mesh = self.lighting(mesh)
         mesh_copy = sr.Mesh(mesh.vertices, mesh.faces)
@@ -133,9 +133,12 @@ class SoftRenderer(nn.Module):
         area_2d = self.get_area(mesh_copy, 1)
 
         mesh = self.transform(mesh)
-        # return self.rasterizer(mesh, mode)
-        return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, 3.0, 8.0, 8.0)[:, None, :, :].repeat(1, 4, 1, 1)
 
-    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface'):
+        if use_soft:  # use for comparison
+            return self.rasterizer(mesh, mode)
+        else:
+            return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, 3.0, 8.0, 8.0)[:, None, :, :].repeat(1, 4, 1, 1)
+
+    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', use_soft=False):
         mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)
-        return self.render_mesh(mesh, mode)
+        return self.render_mesh(mesh, mode, use_soft=use_soft)

@@ -61,6 +61,7 @@ parser.add_argument('-pf', '--print-freq', type=int, default=PRINT_FREQ)
 parser.add_argument('-df', '--demo-freq', type=int, default=DEMO_FREQ)
 parser.add_argument('-sf', '--save-freq', type=int, default=SAVE_FREQ)
 parser.add_argument('-s', '--seed', type=int, default=RANDOM_SEED)
+parser.add_argument('-us', '--use-soft', action='store_true', default=False)  # add method switcher
 args = parser.parse_args()
 
 torch.backends.cudnn.deterministic = True
@@ -110,13 +111,25 @@ def train():
         masks_a = images_a[:,3]
         masks_b = images_b[:,3]
 
-        # soft render images
+        # render images
         render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
                                                             task='train')
         laplacian_loss = laplacian_loss.mean()
         flatten_loss = flatten_loss.mean()
         area_loss = area_loss.mean()
+
+        # render hard image for softRas
+        if args.use_soft:
+            model.set_sigma(1e-7)
+            render_images_hard, _, _, _ = model([images_a, images_b],
+                                                [viewpoints_a, viewpoints_b],
+                                                task='train')
+            model.set_sigma(adjust_sigma(args.sigma_val, i))
+            loss0_h, loss1_h, loss2_h, loss3_h = multiview_iou_loss(render_images_hard, masks_a, masks_b)
+        else:
+            loss0_h = loss0
+            loss1_h = loss1
 
         # compute loss
         loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
@@ -152,12 +165,12 @@ def train():
             torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
-            render_out = render_images[0][:, 3].detach()
+            render_out = render_images_hard[0][:, 3].detach()
             # gt_out = images_a[:,3].detach()
             gt_out = masks_a.detach()
             # gt_out[gt_out < 1.0] = 0.0
             # render_out[render_out > 0.5] = 1.0
-            render_out[render_out < 1.0] = 0.0
+            # render_out[render_out < 1.0] = 0.0
             image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_out.png' % i))
 
@@ -171,7 +184,7 @@ def train():
                   'lr {lr:.6f}\t'
                   'sv {sv:.6f}\t'.format(i, args.num_iterations,
                                          batch_time=batch_time,
-                                         loss0=loss0.data, loss1=loss1.data,
+                                         loss0=loss0_h.data, loss1=loss1_h.data,
                                          lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
             with open(os.path.join(directory_output, 'training_loss.txt'), 'a') as f:
@@ -182,7 +195,7 @@ def train():
                       'lr {lr:.6f}\t'
                       'sv {sv:.6f}\n'.format(i, args.num_iterations,
                                              batch_time=batch_time,
-                                             loss0=loss0.data, loss1=loss1.data,
+                                             loss0=loss0_h.data, loss1=loss1_h.data,
                                              lr=lr, sv=model.renderer.rasterizer.sigma_val))
 
 
