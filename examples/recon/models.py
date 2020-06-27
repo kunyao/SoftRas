@@ -129,8 +129,11 @@ class Model(nn.Module):
         self.encoder = Encoder(im_size=args.image_size)
         self.decoder = Decoder(self.nv, self.nf, 512+1024)
         self.pointfeat = pointnet.PointNetfeat(global_feat=True)
+        # self.renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=args.sigma_val,
+                                        # aggr_func_rgb='hard', camera_mode='look_at', viewing_angle=15,
+                                        # dist_eps=1e-10)
         self.renderer = sr.SoftRenderer(image_size=args.image_size, sigma_val=args.sigma_val,
-                                        aggr_func_rgb='hard', camera_mode='look_at', viewing_angle=15,
+                                        aggr_func_rgb='hard', camera_mode='projection',
                                         dist_eps=1e-10)
         # self.laplacian_loss = sr.LaplacianLoss(self.vertices_base, self.faces)
         self.laplacian_loss = sr.LaplacianLossBatch(True)
@@ -181,20 +184,22 @@ class Model(nn.Module):
         length = self.get_len(fv)
         return length.sum(1)
 
-    def predict_multiview(self, image_a, image_b, viewpoint_a, viewpoint_b, vertices, faces):
+    def predict_multiview(self, image_a, image_b, viewpoint_a, viewpoint_b, P_a, P_b, vertices, faces):
         batch_size = image_a.size(0)
         # [Ia, Ib]
         images = torch.cat((image_a, image_b), dim=0)
         # [Va, Va, Vb, Vb], set viewpoints
         viewpoints = torch.cat((viewpoint_a, viewpoint_a, viewpoint_b, viewpoint_b), dim=0)
-        self.renderer.transform.set_eyes(viewpoints)
-        self.renderer.transform2.set_eyes(viewpoints)
+        Ps = torch.cat((P_a, P_a, P_b, P_b), dim=0)
+        self.renderer.transform.set_P(Ps)
+        # self.renderer.transform.set_eyes(viewpoints)
+        # self.renderer.transform2.set_eyes(viewpoints)
 
         vertices = torch.cat((vertices, vertices), dim=0)
         faces = torch.cat((faces, faces), dim=0)
         vertices, faces, uvs, texture_maps = self.reconstruct(images, vertices, faces)
-        laplacian_loss = self.laplacian_loss(vertices, faces)
-        # laplacian_loss = torch.zeros([])
+        # laplacian_loss = self.laplacian_loss(vertices, faces)
+        laplacian_loss = torch.zeros([])
         # flatten_loss = self.flatten_loss(vertices, faces)
         flatten_loss = torch.zeros([])
         # area_loss = self.area_loss(vertices, faces)
@@ -224,8 +229,8 @@ class Model(nn.Module):
         iou = (voxels * voxels_predict).sum((1, 2, 3)) / (0 < (voxels + voxels_predict)).sum((1, 2, 3))
         return iou, vertices, faces
 
-    def forward(self, images=None, viewpoints=None, vertices=None, faces=None, voxels=None, task='train'):
+    def forward(self, images=None, viewpoints=None, P=None, vertices=None, faces=None, voxels=None, task='train'):
         if task == 'train':
-            return self.predict_multiview(images[0], images[1], viewpoints[0], viewpoints[1], vertices, faces)
+            return self.predict_multiview(images[0], images[1], viewpoints[0], viewpoints[1], P[0], P[1], vertices, faces)
         elif task == 'test':
             return self.evaluate_iou(images, voxels)

@@ -89,7 +89,7 @@ if args.resume_path:
     start_iter = int(os.path.split(args.resume_path)[1][11:].split('.')[0]) + 1
     print('Resuming from %s iteration' % start_iter)
 
-dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train')
+dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train', load_template=True, load_camera=True)
 
 def eval_bn(m):
     classname = m.__class__.__name__
@@ -113,22 +113,25 @@ def train():
         model.set_sigma(adjust_sigma(args.sigma_val, i))
 
         # load images from multi-view
-        images_a, images_b, viewpoints_a, viewpoints_b, vertices, faces = dataset_train.get_random_batch(args.batch_size)
+        images_a, images_b, viewpoints_a, viewpoints_b, vertices, faces, P_a, P_b = dataset_train.get_random_batch(args.batch_size)
         vertices = vertices.cuda()
-        tmp = vertices[:,:,0].clone()
-        vertices[:,:,0] = -vertices[:,:,2]
-        vertices[:,:,2] = -tmp
+        # tmp = vertices[:,:,0].clone()
+        # vertices[:,:,0] = -vertices[:,:,2]
+        # vertices[:,:,2] = -tmp
         faces = faces.cuda().int()
         images_a = images_a.cuda()
         images_b = images_b.cuda()
         viewpoints_a = viewpoints_a.cuda()
         viewpoints_b = viewpoints_b.cuda()
+        P_a = P_a.cuda()
+        P_b = P_b.cuda()
         masks_a = images_a[:, 3]
         masks_b = images_b[:, 3]
 
         # soft render images
         render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
+                                                            [P_a, P_b],
                                                             vertices, faces,
                                                             task='train')
         # laplacian_loss = laplacian_loss.mean()
@@ -165,15 +168,21 @@ def train():
 
         # save demo images
         if i % args.demo_freq == 0:
-            demo_image = images_a[0:1]
+            demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints, template_v, template_f, camera_matrix = dataset_train.get_one_obj(6, load_template=True, load_camera=True)
+            demo_image = demo_image.cuda()
+            template_v = template_v.cuda()
+            template_f = template_f.cuda()
+            demo_image = demo_image[:1]
+            # demo_image = images_a[0:1]
             demo_path_before = os.path.join(directory_output, 'demo_%07d_before.obj'%i)
             demo_path_after = os.path.join(directory_output, 'demo_%07d_after.obj'%i)
             model.apply(eval_bn)
-            demo_v, demo_f, demo_uv, demo_t = model.reconstruct(demo_image, vertices[0][None,:], faces[0][None,:])
+            # demo_v, demo_f, demo_uv, demo_t = model.reconstruct(demo_image, vertices[:1], faces[:1)
+            demo_v, demo_f, demo_uv, demo_t = model.reconstruct(demo_image, template_v[None, :], template_f[None, :])
             model.apply(train_bn)
-            torchvision.utils.save_image(demo_t.permute(0, 3, 1, 2), os.path.join(directory_output, '%07d_texture.png' % i))
+            # torchvision.utils.save_image(demo_t.permute(0, 3, 1, 2), os.path.join(directory_output, '%07d_texture.png' % i))
             torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
-            srf.save_obj(demo_path_before, vertices[0], faces[0])
+            srf.save_obj(demo_path_before, template_v, template_f)
             srf.save_obj(demo_path_after, demo_v[0], demo_f[0])
 
             render_out = render_images[0][:, 3].detach()

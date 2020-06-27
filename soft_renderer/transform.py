@@ -14,12 +14,17 @@ class Projection(nn.Module):
         self.dist_coeffs = dist_coeffs
         self.orig_size = orig_size
 
+        if P is None:
+            self.P = np.zeros((1, 3, 4))
         if isinstance(self.P, np.ndarray):
             self.P = torch.from_numpy(self.P).cuda()
-        if self.P is None or P.ndimension() != 3 or self.P.shape[1] != 3 or self.P.shape[2] != 4:
+        if self.P.shape[1] != 3 or self.P.shape[2] != 4:
             raise ValueError('You need to provide a valid (batch_size)x3x4 projection matrix')
         if dist_coeffs is None:
-            self.dist_coeffs = torch.cuda.FloatTensor([[0., 0., 0., 0., 0.]]).repeat(P.shape[0], 1)
+            if P is None:
+                self.dist_coeffs = torch.cuda.FloatTensor([[0., 0., 0., 0., 0.]])
+            else:
+                self.dist_coeffs = torch.cuda.FloatTensor([[0., 0., 0., 0., 0.]]).repeat(P.shape[0], 1)
 
     def forward(self, vertices):
         vertices = srf.projection(vertices, self.P, self.dist_coeffs, self.orig_size)
@@ -100,6 +105,12 @@ class Transform(nn.Module):
         if self.camera_mode not in ['look', 'look_at']:
             raise ValueError('Projection does not need to set eyes')
         self.transformer._eye = eyes
+
+    def set_P(self, P):
+        if self.camera_mode not in ['projection']:
+            raise ValueError('Projection does not need to set eyes')
+        self.transformer.P = P
+        self.transformer.dist_coeffs = torch.cuda.FloatTensor([[0., 0., 0., 0., 0.]]).repeat(P.shape[0], 1)
 
     @property
     def eyes(self):

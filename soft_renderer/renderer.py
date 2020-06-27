@@ -133,13 +133,20 @@ class SoftRenderer(nn.Module):
         mesh_copy = sr.Mesh(mesh.vertices, mesh.faces)
 
         area_3d = self.get_area(mesh_copy)
-        mesh_copy = self.transform2(mesh_copy)
+        # mesh_copy = self.transform2(mesh_copy)
         area_2d = self.get_area(mesh_copy, 1)
 
         mesh = self.transform(mesh)
+        # mesh.vertices[:, :, :2] = mesh.vertices[:, :, :2] * 2 / self.image_size - 1.0 # for 137 * 137, [0, 137] -> [-1, 1]
         mesh.vertices[:, :, 1] = -mesh.vertices[:, :, 1]  # used in non-softras camera config
-        img = self.rasterizer(mesh, mode)
-        # img = FragmentRasterize.apply(mesh.face_vertices, mesh.uvs, mesh.texture_maps, mesh.textures, mesh.texture_maps.shape[2], area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
+        # img = self.rasterizer(mesh, mode)
+        if mesh.texture_maps is None:
+            mesh.texture_maps = torch.zeros(0).cuda()
+        if mesh.uvs is None:
+            mesh.uvs = torch.zeros(0).cuda()
+
+        img = FragmentRasterize.apply(mesh.face_vertices, mesh.uvs, mesh.texture_maps, mesh.textures, mesh.texture_maps.shape[2], area_2d / area_3d, torch.zeros(0).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0).permute(0, 3, 1, 2)
+        # img = FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), self.image_size, self.win_size, 3.0, 8.0, 8.0)[:, None, :, :].repeat(1, 4, 1, 1)
         return img
 
     def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', uvs=None, texture_maps=None):

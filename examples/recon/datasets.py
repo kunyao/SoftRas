@@ -110,6 +110,9 @@ class ShapeNet(object):
         images_a = torch.from_numpy(self.images[data_ids_a].astype('float32') / 255.)
         images_b = torch.from_numpy(self.images[data_ids_b].astype('float32') / 255.)
 
+        projection_a = torch.from_numpy(self.camera_matrix[data_ids_a].astype('float32'))
+        projection_b = torch.from_numpy(self.camera_matrix[data_ids_b].astype('float32'))
+
         distances = torch.ones(batch_size).float() * self.distance
         elevations_a = torch.ones(batch_size).float() * self.elevation
         elevations_b = torch.ones(batch_size).float() * self.elevation
@@ -119,7 +122,7 @@ class ShapeNet(object):
         vertices_batch = torch.from_numpy(self.vertices[object_global_id].astype('float32'))
         faces_batch = torch.from_numpy(self.faces[object_global_id].astype('float32'))
 
-        return images_a, images_b, viewpoints_a, viewpoints_b, vertices_batch, faces_batch
+        return images_a, images_b, viewpoints_a, viewpoints_b, vertices_batch, faces_batch, projection_a, projection_b
 
     def get_all_batches_for_evaluation(self, batch_size, class_id):
         data_ids = np.arange(self.num_data[class_id]) + self.pos[class_id]

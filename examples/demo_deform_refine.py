@@ -23,10 +23,12 @@ data_dir = os.path.join(current_dir, '../data')
 
 dataset_directory = './data/datasets'
 class_ids = '02828884'
+set_select = 'train'
+image_size = 256
 # class_ids = (
     # '02691156,02828884,02933112,02958343,03001627,03211117,03636649,' +
     # '03691459,04090263,04256520,04379243,04401088,04530566')
-dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), 'train', load_template=True, load_camera=True)
+dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), set_select, load_template=True, load_camera=True)
 
 class Model(nn.Module):
     def __init__(self, vertices, faces):
@@ -112,7 +114,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    renderer = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
+    renderer = sr.SoftRenderer(image_size=image_size, sigma_val=1e-4, aggr_func_rgb='hard',
                                camera_mode='look_at', viewing_angle=15)
 
     # read training images and camera poses
@@ -125,7 +127,12 @@ def main():
     template_v = template_v.cuda()
     camera_matrix = camera_matrix.cuda()
 
-    renderer2 = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
+    camera_list = range(24)
+    images_gt = images_gt[camera_list]
+    camera_matrix = camera_matrix[camera_list]
+    voxel = voxel[camera_list]
+
+    renderer2 = sr.SoftRenderer(image_size=image_size, sigma_val=1e-4, aggr_func_rgb='hard',
                                camera_mode='projection', P=camera_matrix)
 
     # right hand system to left hand system
@@ -142,24 +149,16 @@ def main():
     images_gt[images_gt < 0.5] = 0.0
     '''
 
-    ''' Uncomment for viewpoints slection
-    images_gt = images_gt[0:24,:]
-    dist_maps = dist_maps[0:24,:]
-    camera_distances = camera_distances[0:24]
-    elevations = elevations[0:24]
-    viewpoints = viewpoints[0:24]
-    '''
-
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
 
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
-    loop = tqdm.tqdm(list(range(0, 200)))
+    loop = tqdm.tqdm(list(range(0, 201)))
     writer = imageio.get_writer(os.path.join(args.output_dir, 'deform.gif'), mode='I')
 
     for i in loop:
 
-        mesh, laplacian_loss, flatten_loss = model(24)
+        mesh, laplacian_loss, flatten_loss = model(len(camera_list))
 
         iou3D, voxels_predict = iou_3d(mesh.face_vertices, voxel)
         print(iou3D[0])
@@ -182,7 +181,7 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if i % 10 == 0:
+        if i % 20 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             imageio.imsave(os.path.join(args.output_dir, 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
