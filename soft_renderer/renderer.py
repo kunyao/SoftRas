@@ -137,7 +137,7 @@ class SoftRenderer(nn.Module):
         if use_soft:  # use for comparison
             return self.rasterizer(mesh, mode)
         else:
-            return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, 3.0, 8.0, 8.0)[:, None, :, :].repeat(1, 4, 1, 1)
+            return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, 50, 0.1, 25.0)[:, None, :, :].repeat(1, 4, 1, 1)
 
     def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', use_soft=False):
         mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)

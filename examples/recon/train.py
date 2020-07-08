@@ -119,6 +119,14 @@ def train():
         flatten_loss = flatten_loss.mean()
         area_loss = area_loss.mean()
 
+        # compute loss
+        loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
+        loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
+               args.lambda_laplacian * laplacian_loss + \
+               args.lambda_flatten * flatten_loss
+               # 1e-4 * area_loss
+        losses.update(loss.data.item(), images_a.size(0))
+
         # render hard image for softRas
         if args.use_soft:
             model.set_sigma(1e-7)
@@ -130,14 +138,7 @@ def train():
         else:
             loss0_h = loss0
             loss1_h = loss1
-
-        # compute loss
-        loss0, loss1, loss2, loss3 = multiview_iou_loss(render_images, masks_a, masks_b)
-        loss = (loss0 + loss1 + loss2 + loss3) / 4 + \
-               args.lambda_laplacian * laplacian_loss + \
-               args.lambda_flatten * flatten_loss
-               # 1e-4 * area_loss
-        losses.update(loss.data.item(), images_a.size(0))
+            render_images_hard = render_images
 
         # compute gradient and optimize
         optimizer.zero_grad()
@@ -162,7 +163,14 @@ def train():
             demo_image = demo_image.cuda()
             demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
             demo_v, demo_f = model.reconstruct(demo_image)
-            torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
+            renderer_demo = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
+                                       camera_mode='look_at', viewing_angle=15)
+            renderer_demo.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
+            render_back = renderer_demo.render_mesh(sr.Mesh(demo_v, demo_f))
+            demo_out = torch.cat((render_back[:, 2:3, :, :], demo_image[:, 2:3, :, :].repeat(1, 2, 1, 1)), dim=1)
+            torchvision.utils.save_image(demo_out, os.path.join(directory_output, 'render_%07d.png' % i))
+
+            # torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
             render_out = render_images_hard[0][:, 3].detach()
