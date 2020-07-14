@@ -12,6 +12,11 @@ import os
 import imageio
 import numpy as np
 
+import sys
+sys.path.append('./ChamferDistancePytorch/')
+from chamfer3D import dist_chamfer_3D
+import fscore
+
 BATCH_SIZE = 100
 IMAGE_SIZE = 64
 CLASS_IDS_ALL = (
@@ -42,6 +47,8 @@ parser.add_argument('-sv', '--sigma-val', type=float, default=SIGMA_VAL)
 
 parser.add_argument('-pf', '--print-freq', type=int, default=PRINT_FREQ)
 parser.add_argument('-sf', '--save-freq', type=int, default=SAVE_FREQ)
+parser.add_argument('-us', '--use-soft', action='store_true', default=False)  # add method switcher
+parser.add_argument('-o', '--output-dir', type=str, default='data/results/test')
 args = parser.parse_args()
 
 # setup model & optimizer
@@ -52,9 +59,9 @@ state_dicts = torch.load(args.model_directory)
 model.load_state_dict(state_dicts['model'], strict=False)
 model.eval()
 
-dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val')
+dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val', load_pc=True)
 
-directory_output = './data/results/test'
+directory_output = args.output_dir
 os.makedirs(directory_output, exist_ok=True)
 directory_mesh = os.path.join(directory_output, args.experiment_id)
 os.makedirs(directory_mesh, exist_ok=True)
@@ -91,19 +98,32 @@ def test():
     losses1 = AverageMeter()
 
     iou_all = []
+    d1_all = []
+    chamfer_all = []
+    f_all = []
 
+    chamLoss = dist_chamfer_3D.chamfer_3DDist()
     for class_id, class_name in dataset_val.class_ids_pair:
 
         directory_mesh_cls = os.path.join(directory_mesh, class_id)
         os.makedirs(directory_mesh_cls, exist_ok=True)
         iou = 0
+        d1_sum = 0
+        chamfer_sum = 0
+        f_sum = 0
 
-        for i, (im, vx) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
+        for i, (im, vx, pc) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
             images = torch.autograd.Variable(im).cuda()
             voxels = vx.numpy()
 
             batch_iou, vertices, faces = model(images, voxels=voxels, task='test')
             iou += batch_iou.sum()
+            d1, d2, _, _ = chamLoss(vertices, pc.cuda())
+            f_score, _, _ = fscore.fscore(d1, d2)
+            d1_sum += d1.mean(1).sum().item()
+            chamfer_sum += d1.mean(1).sum().item() + d2.mean(1).sum().item()
+            f_sum += f_score.sum().item()
+
 
             batch_time.update(time.time() - end)
             end = time.time()
@@ -126,10 +146,19 @@ def test():
                                              batch_time=batch_time))
 
         iou_cls = iou / 24. / dataset_val.num_data[class_id] * 100
+        d1_cls =  d1_sum / 24. / dataset_val.num_data[class_id] * 100
+        chamfer_cls = chamfer_sum / 24. / dataset_val.num_data[class_id] * 100
+        f_cls = f_sum / 24. / dataset_val.num_data[class_id] * 100
         iou_all.append(iou_cls)
+        d1_all.append(d1_cls)
+        chamfer_all.append(chamfer_cls)
+        f_all.append(f_cls)
+
         print('=================================')
-        print('Mean IoU: %.3f for class %s' % (iou_cls, class_name))
-        print('\n')
+        print('Mean IoU: %.3f for class %s\n' % (iou_cls, class_name))
+        print('Mean d1: %.3f for class %s\n' % (d1_cls, class_name))
+        print('Mean Chamfer: %.3f for class %s\n' % (chamfer_cls, class_name))
+        print('Mean F-score: %.3f for class %s\n' % (f_cls, class_name))
 
     print('=================================')
     print('Mean IoU: %.3f for all classes' % (sum(iou_all) / len(iou_all)))

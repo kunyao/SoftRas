@@ -90,6 +90,41 @@ if args.resume_path:
     print('Resuming from %s iteration' % start_iter)
 
 dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train')
+dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val')
+
+def diff_voxel(filename0, filename1, voxel0, voxel1):
+    vertices0 = []
+    vertices1 = []
+    res_x = voxel0.shape[0]
+    res_y = voxel0.shape[1]
+    res_z = voxel0.shape[2]
+    for i in range(res_x):
+        for j in range(res_y):
+            for k in range(res_z):
+                X = j / res_y - 0.5 * (res_y - 1) / res_y
+                Y = i / res_x - 0.5 * (res_x - 1) / res_x
+                Z = -k / res_z + 0.5 * (res_z - 1) / res_z
+                if voxel0[i, j, k] == 0 and voxel1[i, j, k] == 1:
+                    vertices0.append([X, Y, Z])
+                if voxel0[i, j, k] == 1 and voxel1[i, j, k] == 0:
+                    vertices1.append([X, Y, Z])
+    save_obj(filename0, vertices0)
+    save_obj(filename1, vertices1)
+
+
+def save_obj(filename, vertices, faces=[]):
+    """
+    Args:
+        vertices: N*3 np.array
+        faces: M*3 np.array
+    """
+
+    with open(filename, 'w') as fp:
+        for v in vertices:
+            fp.write('v {:.3} {:.3} {:.3}\n'.format(*v))
+        for f in faces:
+            fp.write('f {} {} {}\n'.format(*(f + 1)))
+
 
 def train():
     end = time.time()
@@ -101,6 +136,9 @@ def train():
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
+        # model.set_lambda(30)
+        # model.set_beta(0)
+        model.set_alpha(3)
 
         # load images from multi-view
         images_a, images_b, viewpoints_a, viewpoints_b = dataset_train.get_random_batch(args.batch_size)
@@ -110,6 +148,10 @@ def train():
         viewpoints_b = viewpoints_b.cuda()
         masks_a = images_a[:,3]
         masks_b = images_b[:,3]
+        masks_a[masks_a >= 0.7] = 1.0
+        masks_a[masks_a < 0.7] = 0.0
+        masks_b[masks_b >= 0.7] = 1.0
+        masks_b[masks_b < 0.7] = 0.0
 
         # render images
         render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
@@ -125,6 +167,7 @@ def train():
                args.lambda_laplacian * laplacian_loss + \
                args.lambda_flatten * flatten_loss
                # 1e-4 * area_loss
+
         losses.update(loss.data.item(), images_a.size(0))
 
         # render hard image for softRas
@@ -159,28 +202,36 @@ def train():
         # save demo images
         if i % args.demo_freq == 0:
             # demo_image = images_a[0:1]  # first image in training batch
-            demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_train.get_one_model(5) #
+            demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_val.get_one_model(2) # load model in the val set
             demo_image = demo_image.cuda()
-            demo_path = os.path.join(directory_output, 'demo_%07d.obj'%i)
-            demo_v, demo_f = model.reconstruct(demo_image)
+
+            # recon
+            iou_3d, demo_v, demo_f, voxels_predict = model.evaluate_iou(demo_image, voxel, True)  # 24 views
+
+            # render
             renderer_demo = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
                                        camera_mode='look_at', viewing_angle=15)
             renderer_demo.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
-            render_back = renderer_demo.render_mesh(sr.Mesh(demo_v, demo_f))
+            mesh_test = sr.Mesh(demo_v, demo_f)
+            render_back = renderer_demo.render_mesh(mesh_test)
+
+            # save
             demo_out = torch.cat((render_back[:, 2:3, :, :], demo_image[:, 2:3, :, :].repeat(1, 2, 1, 1)), dim=1)
-            torchvision.utils.save_image(demo_out, os.path.join(directory_output, 'render_%07d.png' % i))
+            torchvision.utils.save_image(demo_out, os.path.join(directory_output, 'render_{:07d}.png'.format(i)))
 
             # torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
+            demo_path = os.path.join(directory_output, 'demo_{:07d}_iou_{:.3f}.obj'.format(i, iou_3d[0].item()))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
+            diff_voxel(os.path.join(directory_output, 'more_{:07d}.obj'.format(i)), os.path.join(directory_output, 'less_{:07d}.obj'.format(i)), voxel, voxels_predict[0])
+
             render_out = render_images_hard[0][:, 3].detach()
-            # gt_out = images_a[:,3].detach()
             gt_out = masks_a.detach()
             # gt_out[gt_out < 1.0] = 0.0
             # render_out[render_out > 0.5] = 1.0
             # render_out[render_out < 1.0] = 0.0
             image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
-            torchvision.utils.save_image(image_out, os.path.join(image_output, '%07d_out.png' % i))
+            torchvision.utils.save_image(image_out, os.path.join(image_output, '{:07d}_out.png'.format(i)))
 
 
         # print
@@ -229,32 +280,5 @@ def adjust_sigma(sigma, i):
     if i >= 150000:
         sigma *= decay
     return sigma
-
-def adjust_beta(i):
-    if i < 1000:
-        return 1
-    elif i < 2000:
-        return 0
-    elif i < 4000:
-        return 0
-    elif i < 6000:
-        return 0
-    elif i < 10000:
-        return 0
-    elif i < 15000:
-        return 0
-    else:
-        return 0
-
-def adjust_alpha(i):
-    if i < 1000:
-        return 5.0
-    elif i < 2000:
-        return 3.0
-    elif i < 3000:
-        return 2.0
-    else:
-        return 1.0
-
 
 train()

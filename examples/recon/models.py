@@ -106,6 +106,18 @@ class Model(nn.Module):
     def set_sigma(self, sigma):
         self.renderer.set_sigma(sigma)
 
+    def set_alpha(self, alpha=1.0):
+        self.renderer.alpha = alpha
+
+    def set_beta(self, beta=20.0):
+        self.renderer.beta = beta
+
+    def set_threshold(self, thres=10.0):
+        self.renderer.thres = thres
+
+    def set_lambda(self, lambda_all=10.0):
+        self.renderer.lambda_all = lambda_all
+
     def reconstruct(self, images):
         vertices, faces = self.decoder(self.encoder(images))
         return vertices, faces
@@ -156,7 +168,7 @@ class Model(nn.Module):
         silhouettes = self.renderer(vertices, faces, use_soft=self.use_soft)  # call render_mesh in forward()
         return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss
 
-    def evaluate_iou(self, images, voxels):
+    def evaluate_iou(self, images, voxels, return_voxel=False):
         vertices, faces = self.reconstruct(images)
 
         faces_ = srf.face_vertices(vertices, faces).data
@@ -164,7 +176,10 @@ class Model(nn.Module):
         voxels_predict = srf.voxelization(faces_norm, 32, False).cpu().numpy()
         voxels_predict = voxels_predict.transpose(0, 2, 1, 3)[:, :, :, ::-1]
         iou = (voxels * voxels_predict).sum((1, 2, 3)) / (0 < (voxels + voxels_predict)).sum((1, 2, 3))
-        return iou, vertices, faces
+        if not return_voxel:
+            return iou, vertices, faces
+        else:
+            return iou, vertices, faces, voxels_predict
 
     def forward(self, images=None, viewpoints=None, voxels=None, task='train'):
         if task == 'train':

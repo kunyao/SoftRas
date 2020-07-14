@@ -23,7 +23,7 @@ class_ids_map = {
 }
 
 class ShapeNet(object):
-    def __init__(self, directory=None, class_ids=None, set_name=None):
+    def __init__(self, directory=None, class_ids=None, set_name=None, load_pc=False):
         self.class_ids = class_ids
         self.set_name = set_name
         self.elevation = 30.
@@ -33,6 +33,7 @@ class ShapeNet(object):
 
         images = []
         voxels = []
+        pcs = []
         self.num_data = {}
         self.pos = {}
         count = 0
@@ -43,15 +44,20 @@ class ShapeNet(object):
                 os.path.join(directory, '%s_%s_images.npz' % (class_id, set_name))).items())[0][1])
             voxels.append(list(np.load(
                 os.path.join(directory, '%s_%s_voxels.npz' % (class_id, set_name))).items())[0][1])
+            if (load_pc):
+                pcs.append(list(np.load(
+                    os.path.join(directory, '%s_%s_pcs.npz' % (class_id, set_name))).items())[0][1])
             self.num_data[class_id] = images[-1].shape[0]
             self.pos[class_id] = count
             count += self.num_data[class_id]
         images = np.concatenate(images, axis=0).reshape((-1, 4, 64, 64))
-        images = np.ascontiguousarray(images)
-        self.images = images
+        self.images = np.ascontiguousarray(images)
         self.voxels = np.ascontiguousarray(np.concatenate(voxels, axis=0))
+        if (load_pc):
+            self.pcs = np.ascontiguousarray(np.concatenate(pcs, axis=0))
         del images
         del voxels
+        del pcs
 
     @property
     def class_ids_pair(self):
@@ -99,9 +105,10 @@ class ShapeNet(object):
         for i in range((data_ids.size - 1) // batch_size + 1):
             images = torch.from_numpy(self.images[data_ids[i * batch_size:(i + 1) * batch_size]].astype('float32') / 255.)
             voxels = torch.from_numpy(self.voxels[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
-            yield images, voxels
+            pcs = torch.from_numpy(self.pcs[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
+            yield images, voxels, pcs
 
-    def get_one_model(self, model_id):
+    def get_one_model(self, model_id, load_pc=False):
         num_views = 24
 
         data_ids = np.arange(num_views) + model_id * 24
@@ -110,17 +117,22 @@ class ShapeNet(object):
         viewpoints = -torch.from_numpy(np.arange(num_views)).float() * 15
 
         images = self.images[data_ids].astype('float32') / 255.
-        masks = images[:, 3, :, :].copy()
-        masks[masks > 0] = 1
-        masks = 1 - masks
+        # masks = images[:, 3, :, :].copy()
+        # masks[masks > 0] = 1
+        # masks = 1 - masks
         dists = []
-        for m in masks:
-            d = ndimage.distance_transform_edt(m)
-            dists.append(d)
+        # for m in masks:
+            # d = ndimage.distance_transform_edt(m)
+            # dists.append(d)
 
-        dists = np.array(dists).astype('float32')
+        # dists = np.array(dists).astype('float32')
 
         images = torch.from_numpy(images)
-        dists = torch.from_numpy(dists)
-        voxels = torch.from_numpy(self.voxels[data_ids // 24].astype('float32'))
-        return images, dists, voxels, distances, elevations, viewpoints
+        # dists = torch.from_numpy(dists)
+        voxels = torch.from_numpy(self.voxels[model_id].astype('float32'))
+        if (load_pc):
+            pcs = torch.from_numpy(self.pcs[model_id].astype('float32'))
+            return images, dists, voxels, pcs, distances, elevations, viewpoints
+        else:
+            return images, dists, voxels, distances, elevations, viewpoints
+
