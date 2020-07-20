@@ -86,8 +86,8 @@ class SoftRenderer(nn.Module):
                                             texture_type)
         self.set_win_size()
         self.set_alpha()
-        self.set_beta()
-        self.set_threshold()
+        self.set_c0()
+        self.set_c1()
         self.set_lambda()
 
     def set_sigma(self, sigma):
@@ -102,11 +102,11 @@ class SoftRenderer(nn.Module):
     def set_alpha(self, alpha=1.0):
         self.alpha = alpha
 
-    def set_beta(self, beta=0.0):
-        self.beta = beta
+    def set_c0(self, c0=5.0):
+        self.c0 = c0
 
-    def set_threshold(self, thres=10.0):
-        self.thres = thres
+    def set_c1(self, c1=10.0):
+        self.c1 = c1
 
     def set_lambda(self, lambda_all=10.0):
         self.lambda_all = lambda_all
@@ -131,7 +131,7 @@ class SoftRenderer(nn.Module):
 
         return area
 
-    def render_mesh(self, mesh,  mode=None, use_soft=False):
+    def render_mesh(self, mesh,  mode=None, use_soft=False, display_taken=False):
         self.set_texture_mode(mesh.texture_type)
         mesh = self.lighting(mesh)
         mesh_copy = sr.Mesh(mesh.vertices, mesh.faces)
@@ -143,10 +143,16 @@ class SoftRenderer(nn.Module):
         mesh = self.transform(mesh)
 
         if use_soft:  # use for comparison
-            return self.rasterizer(mesh, mode)
+            img = self.rasterizer(mesh, mode)
         else:
-            return FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, self.lambda_all, self.alpha, self.thres, self.beta)[:, None, :, :].repeat(1, 4, 1, 1)
+            img, taken_num = FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, self.lambda_all, self.alpha, self.c1, self.c0)
+            img = img[:, None, :, :].repeat(1, 4, 1, 1)
 
-    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', use_soft=False):
+        if display_taken:
+            return img, taken_num
+        else:
+            return img
+
+    def forward(self, vertices, faces, textures=None, mode=None, texture_type='surface', use_soft=False, display_taken=False):
         mesh = sr.Mesh(vertices, faces, textures=textures, texture_type=texture_type)
-        return self.render_mesh(mesh, mode, use_soft=use_soft)
+        return self.render_mesh(mesh, mode, use_soft=use_soft, display_taken=display_taken)

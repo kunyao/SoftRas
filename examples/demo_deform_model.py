@@ -32,7 +32,7 @@ dataset_directory = '/mnt/fire/dvr/data/dataset/'
 # 02828884: bench
 class_ids = '02958343'
 # class_ids = '02691156'
-set_select = 'test'
+set_select = 'val'
 # class_ids = (
     # '02691156,02828884,02933112,02958343,03001627,03211117,03636649,' +
     # '03691459,04090263,04256520,04379243,04401088,04530566')
@@ -176,15 +176,15 @@ def main():
     renderer = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
                                camera_mode='look_at', viewing_angle=15)
 
-    renderer.set_alpha(5.0)      # inner weight, default 1.0
-    renderer.set_beta()       # outer weight, default 0.0
-    renderer.set_threshold()  # inner cut-off, default 10
-    renderer.set_lambda()     # adjust smooth balance, default 10
+    renderer.set_alpha(0.5)      # inner weight, default 1.0
+    renderer.set_c0(1)            # zero weight, default 5
+    renderer.set_c1(1)          # inf cut-off, default 10
+    renderer.set_lambda(1.0)     # adjust smooth balance, default 10
 
     iou_sum = 0;
     count = 0;
     with open(os.path.join(args.output_dir, 'iou_3d.txt'), 'w') as f:
-        for idx in range(1, 2):
+        for idx in range(2, 3):
             model.reinit()
             iou_3d = deform_one_model(renderer, model, dataset, idx, args)
             f.write('{}\n'.format(iou_3d))
@@ -241,7 +241,12 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
         d1, d2, _, _ = chamLoss(mesh.vertices[:1], pcs[None, :].cuda())
         f_score, _, _ = fscore.fscore(d1, d2)
 
-        images_pred = renderer.render_mesh(mesh, use_soft=args.use_soft)
+        if (args.use_soft):
+            images_pred = renderer.render_mesh(mesh, use_soft=args.use_soft)
+            taken_num = None
+        else:
+            images_pred, taken_num = renderer.render_mesh(mesh, use_soft=args.use_soft, display_taken=True)
+            taken_num = taken_num / 50
 
         # optimize mesh with silhouette reprojection error and
         # geometry constraints
@@ -264,8 +269,13 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             # imageio.imsave(os.path.join(args.output_dir, "{}".format(data_idx), 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
-            image_out = torch.cat((images_hard.detach()[:, 3][:, None, :, :], images_gt.detach()[:, 3][:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
+            if taken_num is None:
+                image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None].repeat(1, 2, 1, 1)), dim=1)
+            else:
+                image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None], taken_num.detach()[:, None]), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(args.output_dir, "{}".format(data_idx), 'views_%05d.png'%i))
+            # image_out2 = torch.cat((images_hard.detach()[:, 3][:, None], taken_num.detach()[:, None].repeat(1, 2, 1, 1)), dim=1)
+            # torchvision.utils.save_image(image_out2, os.path.join(args.output_dir, "{}".format(data_idx), 'nums_%05d.png'%i))
             model(1)[0].save_obj(os.path.join(args.output_dir, "{}".format(data_idx), 'plane%05d.obj'%i), save_texture=False)
             f1d.write("{} {}\n".format(i, 1.0 - hard_iou.item()))
             f2d.write("{} {}\n".format(i, iou3D[0].item()))
@@ -283,7 +293,10 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
     with imageio.get_writer(os.path.join(args.output_dir, "{}".format(data_idx), 'views.gif'), mode='I') as writer:
         for filename in sorted(glob.glob(os.path.join(args.output_dir, "{}".format(data_idx), 'views_*.png'))):
             writer.append_data(imageio.imread(filename))
-    writer.close()
+
+    with imageio.get_writer(os.path.join(args.output_dir, "{}".format(data_idx), 'nums.gif'), mode='I') as writer:
+        for filename in sorted(glob.glob(os.path.join(args.output_dir, "{}".format(data_idx), 'nums_*.png'))):
+            writer.append_data(imageio.imread(filename))
 
     f1d.close()
     f2d.close()

@@ -109,11 +109,11 @@ class Model(nn.Module):
     def set_alpha(self, alpha=1.0):
         self.renderer.alpha = alpha
 
-    def set_beta(self, beta=20.0):
-        self.renderer.beta = beta
+    def set_c0(self, c0=1.0):
+        self.renderer.c0 = c0
 
-    def set_threshold(self, thres=10.0):
-        self.renderer.thres = thres
+    def set_c1(self, c1=1.0):
+        self.renderer.c1 = c1
 
     def set_lambda(self, lambda_all=10.0):
         self.renderer.lambda_all = lambda_all
@@ -165,8 +165,8 @@ class Model(nn.Module):
         faces = torch.cat((faces, faces), dim=0)
 
         # [Raa, Rba, Rab, Rbb], cross render multiview images
-        silhouettes = self.renderer(vertices, faces, use_soft=self.use_soft)  # call render_mesh in forward()
-        return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss
+        silhouettes, sparsity = self.renderer(vertices, faces, use_soft=self.use_soft, display_taken=True)  # call render_mesh in forward()
+        return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss, sparsity
 
     def evaluate_iou(self, images, voxels, return_voxel=False):
         vertices, faces = self.reconstruct(images)

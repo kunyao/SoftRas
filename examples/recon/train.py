@@ -3,7 +3,7 @@ import argparse
 import torch
 import torchvision
 import numpy as np
-from losses import multiview_iou_loss
+from losses import multiview_iou_loss, iou_loss
 from utils import AverageMeter, img_cvt
 import soft_renderer as sr
 import soft_renderer.functional as srf
@@ -90,7 +90,7 @@ if args.resume_path:
     print('Resuming from %s iteration' % start_iter)
 
 dataset_train = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'train')
-dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val')
+# dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val')
 
 def diff_voxel(filename0, filename1, voxel0, voxel1):
     vertices0 = []
@@ -136,9 +136,10 @@ def train():
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
-        # model.set_lambda(30)
-        # model.set_beta(0)
-        model.set_alpha(3)
+        model.set_lambda(0.01)
+        model.set_c0(10)
+        model.set_alpha(0.1)
+        model.set_c1(30)
 
         # load images from multi-view
         images_a, images_b, viewpoints_a, viewpoints_b = dataset_train.get_random_batch(args.batch_size)
@@ -148,13 +149,14 @@ def train():
         viewpoints_b = viewpoints_b.cuda()
         masks_a = images_a[:,3]
         masks_b = images_b[:,3]
-        masks_a[masks_a >= 0.7] = 1.0
-        masks_a[masks_a < 0.7] = 0.0
-        masks_b[masks_b >= 0.7] = 1.0
-        masks_b[masks_b < 0.7] = 0.0
+        # masks_a[masks_a >= 0.7] = 1.0
+        # masks_a[masks_a < 0.7] = 0.0
+        # masks_b[masks_b >= 0.7] = 1.0
+        # masks_b[masks_b < 0.7] = 0.0
+
 
         # render images
-        render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
+        render_images, laplacian_loss, flatten_loss, area_loss, sparsity = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
                                                             task='train')
         laplacian_loss = laplacian_loss.mean()
@@ -200,38 +202,48 @@ def train():
                 }, model_path)
 
         # save demo images
-        if i % args.demo_freq == 0:
-            # demo_image = images_a[0:1]  # first image in training batch
-            demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_val.get_one_model(2) # load model in the val set
-            demo_image = demo_image.cuda()
-
-            # recon
-            iou_3d, demo_v, demo_f, voxels_predict = model.evaluate_iou(demo_image, voxel, True)  # 24 views
-
-            # render
-            renderer_demo = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
-                                       camera_mode='look_at', viewing_angle=15)
-            renderer_demo.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
-            mesh_test = sr.Mesh(demo_v, demo_f)
-            render_back = renderer_demo.render_mesh(mesh_test)
-
-            # save
-            demo_out = torch.cat((render_back[:, 2:3, :, :], demo_image[:, 2:3, :, :].repeat(1, 2, 1, 1)), dim=1)
-            torchvision.utils.save_image(demo_out, os.path.join(directory_output, 'render_{:07d}.png'.format(i)))
-
-            # torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
-            demo_path = os.path.join(directory_output, 'demo_{:07d}_iou_{:.3f}.obj'.format(i, iou_3d[0].item()))
+        if i % args.demo_freq == 0 or i == start_iter:
+            demo_image = images_a[:1]  # first image in training batch
+            demo_v, demo_f = model.reconstruct(demo_image)
+            demo_path = os.path.join(directory_output, 'demo_{:07d}.obj'.format(i))
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
-            diff_voxel(os.path.join(directory_output, 'more_{:07d}.obj'.format(i)), os.path.join(directory_output, 'less_{:07d}.obj'.format(i)), voxel, voxels_predict[0])
+            ## trace deformation of one model
+            # demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_val.get_one_model(2) # load model in the val set
+            # demo_image = demo_image.cuda()
 
-            render_out = render_images_hard[0][:, 3].detach()
+            ## recon
+            # iou_3d, demo_v, demo_f, voxels_predict = model.evaluate_iou(demo_image, voxel, True)  # 24 views
+
+            ## render
+            # renderer_demo = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
+                                       # camera_mode='look_at', viewing_angle=15)
+            # renderer_demo.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
+            # mesh_test = sr.Mesh(demo_v, demo_f)
+            # render_back = renderer_demo.render_mesh(mesh_test)
+            # iou_2d = iou_loss(demo_image[:, 3], render_back[:, 3])
+
+            ## save
+            # demo_out = torch.cat((render_back[:, 3:4, :, :], demo_image[:, 3:4, :, :].repeat(1, 2, 1, 1)), dim=1)
+            # torchvision.utils.save_image(demo_out, os.path.join(directory_output, 'render_{:07d}.png'.format(i)))
+
+            # torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
+            # demo_path = os.path.join(directory_output, 'demo_{:07d}_3d{:.3f}_2d{:.3f}.obj'.format(i, iou_3d.mean().item(), iou_2d.item()))
+            # srf.save_obj(demo_path, demo_v[0], demo_f[0])
+
+            ## save voxel diff
+            # diff_voxel(os.path.join(directory_output, 'more_{:07d}.obj'.format(i)), os.path.join(directory_output, 'less_{:07d}.obj'.format(i)), voxel, voxels_predict[0])
+
+            ## show 2d in training set
+            render_out = render_images_hard[0][:, 3].detach()  # samples in view set a
             gt_out = masks_a.detach()
             # gt_out[gt_out < 1.0] = 0.0
             # render_out[render_out > 0.5] = 1.0
             # render_out[render_out < 1.0] = 0.0
-            image_out = torch.cat((render_out[:, None, :, :], gt_out[:, None, :, :].repeat(1, 2, 1, 1)), dim=1)
+            image_out = torch.cat((render_out[:, None], gt_out[:, None].repeat(1, 2, 1, 1)), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(image_output, '{:07d}_out.png'.format(i)))
+            image_out2 = sparsity.detach() / 100
+            torchvision.utils.save_image(image_out2[:, None], os.path.join(image_output, '{:07d}_sp.png'.format(i)))
 
 
         # print
