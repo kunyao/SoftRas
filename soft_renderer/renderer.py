@@ -145,7 +145,7 @@ class SoftRenderer(nn.Module):
         if use_soft:  # use for comparison
             img = self.rasterizer(mesh, mode)
         else:
-            img, taken_num = FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, self.lambda_all, self.alpha, self.c1, self.c0)
+            img, taken_num = FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, self.lambda_all, self.alpha, self.c0, self.c1)
             img = img[:, None, :, :].repeat(1, 4, 1, 1)
 
         if display_taken:
