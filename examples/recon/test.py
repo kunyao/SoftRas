@@ -59,7 +59,7 @@ state_dicts = torch.load(args.model_directory)
 model.load_state_dict(state_dicts['model'], strict=False)
 model.eval()
 
-dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val', load_pc=True)
+dataset_val = datasets.ShapeNet(args.dataset_directory, args.class_ids.split(','), 'val', load_pc=False)
 
 directory_output = args.output_dir
 os.makedirs(directory_output, exist_ok=True)
@@ -112,17 +112,18 @@ def test():
         chamfer_sum = 0
         f_sum = 0
 
-        for i, (im, vx, pc) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
+        # for i, (im, vx, pc) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
+        for i, (im, vx) in enumerate(dataset_val.get_all_batches_for_evaluation(args.batch_size, class_id)):
             images = torch.autograd.Variable(im).cuda()
             voxels = vx.numpy()
 
             batch_iou, vertices, faces = model(images, voxels=voxels, task='test')
             iou += batch_iou.sum()
-            d1, d2, _, _ = chamLoss(vertices, pc.cuda())
-            f_score, _, _ = fscore.fscore(d1, d2)
-            d1_sum += d1.mean(1).sum().item()
-            chamfer_sum += d1.mean(1).sum().item() + d2.mean(1).sum().item()
-            f_sum += f_score.sum().item()
+            # d1, d2, _, _ = chamLoss(vertices, pc.cuda())
+            # f_score, _, _ = fscore.fscore(d1, d2)
+            # d1_sum += d1.mean(1).sum().item()
+            # chamfer_sum += d1.mean(1).sum().item() + d2.mean(1).sum().item()
+            # f_sum += f_score.sum().item()
 
 
             batch_time.update(time.time() - end)
@@ -146,19 +147,19 @@ def test():
                                              batch_time=batch_time))
 
         iou_cls = iou / 24. / dataset_val.num_data[class_id] * 100
-        d1_cls =  d1_sum / 24. / dataset_val.num_data[class_id] * 100
-        chamfer_cls = chamfer_sum / 24. / dataset_val.num_data[class_id] * 100
-        f_cls = f_sum / 24. / dataset_val.num_data[class_id] * 100
+        # d1_cls =  d1_sum / 24. / dataset_val.num_data[class_id] * 100
+        # chamfer_cls = chamfer_sum / 24. / dataset_val.num_data[class_id] * 100
+        # f_cls = f_sum / 24. / dataset_val.num_data[class_id] * 100
         iou_all.append(iou_cls)
-        d1_all.append(d1_cls)
-        chamfer_all.append(chamfer_cls)
-        f_all.append(f_cls)
+        # d1_all.append(d1_cls)
+        # chamfer_all.append(chamfer_cls)
+        # f_all.append(f_cls)
 
         print('=================================')
         print('Mean IoU: %.3f for class %s\n' % (iou_cls, class_name))
-        print('Mean d1: %.3f for class %s\n' % (d1_cls, class_name))
-        print('Mean Chamfer: %.3f for class %s\n' % (chamfer_cls, class_name))
-        print('Mean F-score: %.3f for class %s\n' % (f_cls, class_name))
+        # print('Mean d1: %.3f for class %s\n' % (d1_cls, class_name))
+        # print('Mean Chamfer: %.3f for class %s\n' % (chamfer_cls, class_name))
+        # print('Mean F-score: %.3f for class %s\n' % (f_cls, class_name))
 
     print('=================================')
     print('Mean IoU: %.3f for all classes' % (sum(iou_all) / len(iou_all)))

@@ -105,8 +105,8 @@ class ShapeNet(object):
         for i in range((data_ids.size - 1) // batch_size + 1):
             images = torch.from_numpy(self.images[data_ids[i * batch_size:(i + 1) * batch_size]].astype('float32') / 255.)
             voxels = torch.from_numpy(self.voxels[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
-            pcs = torch.from_numpy(self.pcs[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
-            yield images, voxels, pcs
+            # pcs = torch.from_numpy(self.pcs[data_ids[i * batch_size:(i + 1) * batch_size] // 24].astype('float32'))
+            yield images, voxels
 
     def get_one_model(self, model_id, load_pc=False):
         num_views = 24
@@ -135,4 +135,3 @@ class ShapeNet(object):
             return images, dists, voxels, pcs, distances, elevations, viewpoints
         else:
             return images, dists, voxels, distances, elevations, viewpoints
-

@@ -136,9 +136,9 @@ def train():
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
-        model.set_lambda(0.0)
+        model.set_lambda(0.0)  # 1.0
         model.set_c0(3)
-        model.set_alpha(0.1)
+        model.set_alpha(0.0)  # 0.1
         model.set_c1(30)
 
         # load images from multi-view
