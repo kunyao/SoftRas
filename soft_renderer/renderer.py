@@ -84,11 +84,10 @@ class SoftRenderer(nn.Module):
                                             sigma_val, dist_func, dist_eps,
                                             gamma_val, aggr_func_rgb, aggr_func_alpha,
                                             texture_type)
-        self.set_win_size()
         self.set_alpha()
+        self.set_beta()
         self.set_c0()
         self.set_c1()
-        self.set_lambda()
 
     def set_sigma(self, sigma):
         self.rasterizer.sigma_val = sigma
@@ -96,20 +95,17 @@ class SoftRenderer(nn.Module):
     def set_gamma(self, gamma):
         self.rasterizer.gamma_val = gamma
 
-    def set_win_size(self, win_size=40):
-        self.win_size = win_size
-
-    def set_alpha(self, alpha=1.0):
-        self.alpha = alpha
-
     def set_c0(self, c0=5.0):
         self.c0 = c0
 
     def set_c1(self, c1=10.0):
         self.c1 = c1
 
-    def set_lambda(self, lambda_all=10.0):
-        self.lambda_all = lambda_all
+    def set_alpha(self, alpha=1.0):
+        self.alpha = alpha
+
+    def set_beta(self, beta=0.1):
+        self.beta = beta
 
     def set_texture_mode(self, mode):
         assert mode in ['vertex', 'surface'], 'Mode only support surface and vertex'
@@ -145,7 +141,7 @@ class SoftRenderer(nn.Module):
         if use_soft:  # use for comparison
             img = self.rasterizer(mesh, mode)
         else:
-            img, taken_num = FragmentRasterize.apply(mesh.face_vertices, area_2d / area_3d, torch.zeros(32, 64, 64).cuda(), 64, self.win_size, self.lambda_all, self.alpha, self.c0, self.c1)
+            img, taken_num = FragmentRasterize.apply(mesh.face_vertices, 64, self.alpha, self.beta, self.c0, self.c1)
             img = img[:, None, :, :].repeat(1, 4, 1, 1)
 
         if display_taken:

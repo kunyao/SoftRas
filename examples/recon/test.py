@@ -80,12 +80,28 @@ def save_obj(filename, vertices, faces=[]):
             fp.write('f {} {} {}\n'.format(*(f + 1)))
 
 def save_voxel(filename, voxel):
+    '''
+    Input data:
+        Sampling range: [-0.5, 0.5]
+        Sampling on the centroid
+        Sampling resolution: res
+        Start: -0.5 + 0.5 / res
+        End: 0.5 - 0.5 / res
+        Step: 1 / res
+        Transfer: [0, res-1] --> [start, end]
+    '''
     vertices = []
-    for i in range(voxel.shape[0]):
-        for j in range(voxel.shape[1]):
-            for k in range(voxel.shape[2]):
+    res_x = voxel.shape[0]
+    res_y = voxel.shape[1]
+    res_z = voxel.shape[2]
+    for i in range(res_x):
+        for j in range(res_y):
+            for k in range(res_z):
                 if voxel[i, j, k] == 1:
-                    vertices.append([j / voxel.shape[0] - 0.5, i / voxel.shape[1] - 0.5, 0.5 - k / voxel.shape[2]])
+                    X = j / res_y - 0.5 * (res_y - 1) / res_y
+                    Y = i / res_x - 0.5 * (res_x - 1) / res_x
+                    Z = -k / res_z + 0.5 * (res_z - 1) / res_z
+                    vertices.append([X, Y, Z])
 
     save_obj(filename, vertices)
 
@@ -102,7 +118,9 @@ def test():
     chamfer_all = []
     f_all = []
 
-    chamLoss = dist_chamfer_3D.chamfer_3DDist()
+    # chamLoss = dist_chamfer_3D.chamfer_3DDist()
+    results_dir = os.path.join(directory_mesh, 'results.txt')
+    f = open(results_dir, 'w')
     for class_id, class_name in dataset_val.class_ids_pair:
 
         directory_mesh_cls = os.path.join(directory_mesh, class_id)
@@ -117,7 +135,7 @@ def test():
             images = torch.autograd.Variable(im).cuda()
             voxels = vx.numpy()
 
-            batch_iou, vertices, faces = model(images, voxels=voxels, task='test')
+            batch_iou, vertices, faces, voxel_recon = model(images, voxels=voxels, task='test', return_voxel=True)
             iou += batch_iou.sum()
             # d1, d2, _, _ = chamLoss(vertices, pc.cuda())
             # f_score, _, _ = fscore.fscore(d1, d2)
@@ -133,10 +151,14 @@ def test():
             for k in range(vertices.size(0)):
                 obj_id = (i * args.batch_size + k)
                 if obj_id % args.save_freq == 0:
-                    mesh_path = os.path.join(directory_mesh_cls, '%06d.obj' % obj_id)
+                    mesh_path = os.path.join(directory_mesh_cls, '{:06d}_mesh_iou{:.4f}.obj'.format(obj_id, batch_iou[k].item()))
+                    voxel_path = os.path.join(directory_mesh_cls, '{:06d}_voxel_iou{:.4f}.obj'.format(obj_id, batch_iou[k].item()))
+                    gt_path = os.path.join(directory_mesh_cls, '{:06d}_gt.obj'.format(obj_id))
                     input_path = os.path.join(directory_mesh_cls, '%06d.png' % obj_id)
                     srf.save_obj(mesh_path, vertices[k], faces[k])
                     imageio.imsave(input_path, img_cvt(images[k]))
+                    save_voxel(voxel_path, voxel_recon[k])
+                    save_voxel(gt_path, voxels[k])
 
             # print loss
             if i % args.print_freq == 0:
@@ -157,12 +179,18 @@ def test():
 
         print('=================================')
         print('Mean IoU: %.3f for class %s\n' % (iou_cls, class_name))
+        f.write('=================================\n')
+        f.write('Mean IoU: %.3f for class %s\n' % (iou_cls, class_name))
+        f.flush()
         # print('Mean d1: %.3f for class %s\n' % (d1_cls, class_name))
         # print('Mean Chamfer: %.3f for class %s\n' % (chamfer_cls, class_name))
         # print('Mean F-score: %.3f for class %s\n' % (f_cls, class_name))
 
     print('=================================')
     print('Mean IoU: %.3f for all classes' % (sum(iou_all) / len(iou_all)))
+    f.write('=================================\n')
+    f.write('Mean IoU: %.3f for all classes\n' % (sum(iou_all) / len(iou_all)))
+    f.close()
 
 
 test()

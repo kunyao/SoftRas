@@ -12,6 +12,7 @@ import models
 import imageio
 import time
 import os
+import matplotlib.pyplot as plt
 
 CLASS_IDS_ALL = (
     '02691156,02828884,02933112,02958343,03001627,03211117,03636649,' +
@@ -136,9 +137,9 @@ def train():
         # adjust learning rate and sigma_val (decay after 150k iter)
         lr = adjust_learning_rate([optimizer], args.learning_rate, i, method=args.lr_type)
         model.set_sigma(adjust_sigma(args.sigma_val, i))
-        model.set_lambda(0.0)  # 1.0
+        model.set_lambda(1.0)  # 1.0
         model.set_c0(3)
-        model.set_alpha(0.0)  # 0.1
+        model.set_alpha(0.1)  # 0.1
         model.set_c1(30)
 
         # load images from multi-view
@@ -158,7 +159,10 @@ def train():
         # render images
         render_images, laplacian_loss, flatten_loss, area_loss, sparsity = model([images_a, images_b],
                                                             [viewpoints_a, viewpoints_b],
-                                                            task='train')
+                                                            task='train', display_taken=True)
+        # render_images, laplacian_loss, flatten_loss, area_loss = model([images_a, images_b],
+                                                            # [viewpoints_a, viewpoints_b],
+                                                            # task='train')
         laplacian_loss = laplacian_loss.mean()
         flatten_loss = flatten_loss.mean()
         area_loss = area_loss.mean()
@@ -209,7 +213,7 @@ def train():
             srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
             ## trace deformation of one model
-            # demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_val.get_one_model(2) # load model in the val set
+            # demo_image, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset_train.get_one_model(6) # load model in the val set
             # demo_image = demo_image.cuda()
 
             ## recon
@@ -229,6 +233,7 @@ def train():
 
             # torchvision.utils.save_image(demo_image, os.path.join(directory_output, 'input_%07d.png' % i))
             # demo_path = os.path.join(directory_output, 'demo_{:07d}_3d{:.3f}_2d{:.3f}.obj'.format(i, iou_3d.mean().item(), iou_2d.item()))
+            # demo_path = os.path.join(directory_output, 'demo_{:07d}.obj'.format(i))
             # srf.save_obj(demo_path, demo_v[0], demo_f[0])
 
             ## save voxel diff
@@ -242,8 +247,19 @@ def train():
             # render_out[render_out < 1.0] = 0.0
             image_out = torch.cat((render_out[:, None], gt_out[:, None].repeat(1, 2, 1, 1)), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(image_output, '{:07d}_out.png'.format(i)))
-            image_out2 = sparsity.detach() / 100
-            torchvision.utils.save_image(image_out2[:, None], os.path.join(image_output, '{:07d}_sp.png'.format(i)))
+
+            sp_batch = torchvision.utils.make_grid(sparsity[17:18, None])
+            image_sp = sp_batch.detach().cpu().numpy()[0]
+            # image_sp_diffx = np.diff(image_sp, axis=0)[:,:63]
+            # image_sp_diffy = np.diff(image_sp, axis=1)[:63,:]
+            # image_sp_grad = np.hypot(image_sp_diffx, image_sp_diffy)
+            plt.imshow(image_sp, cmap='hot', clim=(0, 40))
+            plt.axis('off')
+            plt.colorbar()
+            plt.savefig(os.path.join(image_output, '{:07d}_sp.png'.format(i)))
+
+            # plt.imshow(image_sp_grad, cmap='hot',clim=(0, 30))
+            # plt.savefig(os.path.join(image_output, '{:07d}_sp_grad.png'.format(i)))
 
 
         # print

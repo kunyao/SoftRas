@@ -30,13 +30,17 @@ dataset_directory = '/mnt/fire/dvr/data/dataset/'
 # 02958343: car
 # 02691156: airplane
 # 02828884: bench
-class_ids = '02958343'
-# class_ids = '02691156'
+# class_ids = '02933112' # cabinet
+# class_ids = '04256520' # sofa
+class_ids = '02958343'   # car
+# class_ids = '02691156' # plane
+# class_ids = '04530566' # boat
 set_select = 'val'
 # class_ids = (
     # '02691156,02828884,02933112,02958343,03001627,03211117,03636649,' +
     # '03691459,04090263,04256520,04379243,04401088,04530566')
-dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), set_select, load_pc=True)
+# dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), set_select, load_pc=True)
+dataset = datasets.ShapeNet(dataset_directory, class_ids.split(','), set_select)
 
 class Model(nn.Module):
     def __init__(self, template_path):
@@ -44,7 +48,7 @@ class Model(nn.Module):
 
         # set template mesh
         self.template_mesh = sr.Mesh.from_obj(template_path)
-        self.register_buffer('vertices', self.template_mesh.vertices * 0.5)
+        self.register_buffer('vertices', self.template_mesh.vertices * 0.3)
         self.register_buffer('faces', self.template_mesh.faces)
         self.register_buffer('textures', self.template_mesh.textures)
 
@@ -176,10 +180,10 @@ def main():
     renderer = sr.SoftRenderer(image_size=64, sigma_val=1e-4, aggr_func_rgb='hard',
                                camera_mode='look_at', viewing_angle=15)
 
-    renderer.set_alpha(0.5)      # inner weight, default 1.0
-    renderer.set_c0(1)            # zero weight, default 5
-    renderer.set_c1(1)          # inf cut-off, default 10
-    renderer.set_lambda(1.0)     # adjust smooth balance, default 10
+    renderer.set_beta(0.1)
+    renderer.set_c0(3)
+    renderer.set_c1(50)
+    renderer.set_alpha(0.0)
 
     iou_sum = 0;
     count = 0;
@@ -200,7 +204,8 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
     os.makedirs(os.path.join(args.output_dir, "{}".format(data_idx)), exist_ok=True)
 
     # read training images and camera poses
-    images_gt, dist_maps, voxel, pcs, camera_distances, elevations, viewpoints = dataset.get_one_model(data_idx, load_pc=True)
+    # images_gt, dist_maps, voxel, pcs, camera_distances, elevations, viewpoints = dataset.get_one_model(data_idx, load_pc=True)
+    images_gt, dist_maps, voxel, camera_distances, elevations, viewpoints = dataset.get_one_model(data_idx)
     voxel = voxel.numpy()
     images_gt = images_gt.cuda()
     # dist_maps = dist_maps.cuda()
@@ -211,6 +216,8 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
 
     # viewpoints slection
     views_set = range(24)
+    # views_set = range(0, 24, 7)
+    # views_set = range(21, 24, 7)
     images_gt = images_gt[views_set,:]
     # dist_maps = dist_maps[views_set,:]
     camera_distances = camera_distances[views_set]
@@ -221,7 +228,7 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
 
     renderer.transform.set_eyes_from_angles(camera_distances, elevations, viewpoints)
 
-    loop = tqdm.tqdm(list(range(0, 401)))
+    loop = tqdm.tqdm(list(range(0, 501)))
     writer = imageio.get_writer(os.path.join(args.output_dir, "{}".format(data_idx), 'deform.gif'), mode='I')
 
     f1d = open(os.path.join(args.output_dir, "{}".format(data_idx), '2d_iou.txt'), 'w')
@@ -233,20 +240,21 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
     chamLoss = dist_chamfer_3D.chamfer_3DDist()
 
     for i in loop:
+        if i == 400 and args.use_soft == True:
+            args.use_soft=False
         mesh, laplacian_loss, flatten_loss = model(len(views_set))
         iou3D, voxels_predict = iou_3d(mesh.face_vertices[:1], voxel[None,:])
-        np.savez('pc1.npz', pc = mesh.vertices[0].cpu().detach().numpy())
-        np.savez('pc2.npz', pc = pcs.cpu().detach().numpy())
+        # np.savez('pc1.npz', pc = mesh.vertices[0].cpu().detach().numpy())
+        # np.savez('pc2.npz', pc = pcs.cpu().detach().numpy())
 
-        d1, d2, _, _ = chamLoss(mesh.vertices[:1], pcs[None, :].cuda())
-        f_score, _, _ = fscore.fscore(d1, d2)
+        # d1, d2, _, _ = chamLoss(mesh.vertices[:1], pcs[None, :].cuda())
+        # f_score, _, _ = fscore.fscore(d1, d2)
 
         if (args.use_soft):
             images_pred = renderer.render_mesh(mesh, use_soft=args.use_soft)
             taken_num = None
         else:
             images_pred, taken_num = renderer.render_mesh(mesh, use_soft=args.use_soft, display_taken=True)
-            taken_num = taken_num / 50
 
         # optimize mesh with silhouette reprojection error and
         # geometry constraints
@@ -259,29 +267,40 @@ def deform_one_model(renderer, model, datasetet, data_idx, args):
         images_hard[images_hard >= 0.95] = 1.0
         hard_iou = neg_iou_loss(images_hard[:, 3], images_gt[:, 3])
 
-        loop.set_description('2D IoU: {:.4f}, 3D IoU: {:.4f}, Chamfer d1: {:.4f}, d2: {:.4f}, F score: {:.4f}'.format(1 - hard_iou.item(), iou3D[0].item(), d1.mean().item()*100, d2.mean().item()*100, f_score.item()))
+        # loop.set_description('2D IoU: {:.4f}, 3D IoU: {:.4f}, Chamfer d1: {:.4f}, d2: {:.4f}, F score: {:.4f}'.format(1 - hard_iou.item(), iou3D[0].item(), d1.mean().item()*100, d2.mean().item()*100, f_score.item()))
+        loop.set_description('2D IoU: {:.4f}, 3D IoU: {:.4f}'.format(1 - hard_iou.item(), iou3D[0].item()))
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        if i % 20 == 0:
+        if i % 50 == 0:
             image = images_pred.detach().cpu().numpy()[0].transpose((1, 2, 0))
             writer.append_data((255*image).astype(np.uint8))
             # imageio.imsave(os.path.join(args.output_dir, "{}".format(data_idx), 'deform_%05d.png'%i), (255*image[..., -1]).astype(np.uint8))
-            if taken_num is None:
-                image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None].repeat(1, 2, 1, 1)), dim=1)
-            else:
-                image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None], taken_num.detach()[:, None]), dim=1)
+            # taken_num = None
+            # if taken_num is None:
+            image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None].repeat(1, 2, 1, 1)), dim=1)
+            # image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None], grad_2d[:, None]), dim=1)
+            # else:
+                # image_out = torch.cat((images_hard.detach()[:, 3][:, None], images_gt.detach()[:, 3][:, None], taken_num.detach()[:, None]), dim=1)
             torchvision.utils.save_image(image_out, os.path.join(args.output_dir, "{}".format(data_idx), 'views_%05d.png'%i))
             # image_out2 = torch.cat((images_hard.detach()[:, 3][:, None], taken_num.detach()[:, None].repeat(1, 2, 1, 1)), dim=1)
             # torchvision.utils.save_image(image_out2, os.path.join(args.output_dir, "{}".format(data_idx), 'nums_%05d.png'%i))
             model(1)[0].save_obj(os.path.join(args.output_dir, "{}".format(data_idx), 'plane%05d.obj'%i), save_texture=False)
             f1d.write("{} {}\n".format(i, 1.0 - hard_iou.item()))
             f2d.write("{} {}\n".format(i, iou3D[0].item()))
-            f3d.write("{} {}\n".format(i, d1.mean().item()))
-            f3d.write("{} {}\n".format(i, (d1.mean()+d2.mean()).item()))
-            f3d.write("{} {}\n".format(i, f_score.item()))
+            # f3d.write("{} {}\n".format(i, d1.mean().item()))
+            # f3d.write("{} {}\n".format(i, (d1.mean()+d2.mean()).item()))
+            # f3d.write("{} {}\n".format(i, f_score.item()))
+
+    sparsity = torchvision.utils.make_grid(taken_num[:, None])
+    image_sp = sparsity.detach().cpu().numpy()[0]  # first channel
+    plt.imshow(image_sp, cmap='hot', clim=(0, 30))
+    plt.axis('off')
+    im_ratio = image_sp.shape[0] / image_sp.shape[1]
+    plt.colorbar(fraction=0.046*im_ratio, pad=0.04)
+    plt.savefig(os.path.join(args.output_dir, '{}'.format(data_idx), 'sparsity.png'))
 
 
     # save optimized mesh

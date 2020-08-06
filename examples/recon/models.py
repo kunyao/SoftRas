@@ -146,7 +146,7 @@ class Model(nn.Module):
         length = self.get_len(fv)
         return length.sum(1)
 
-    def predict_multiview(self, image_a, image_b, viewpoint_a, viewpoint_b):
+    def predict_multiview(self, image_a, image_b, viewpoint_a, viewpoint_b, display_taken=False):
         batch_size = image_a.size(0)
         # [Ia, Ib]
         images = torch.cat((image_a, image_b), dim=0)
@@ -165,8 +165,12 @@ class Model(nn.Module):
         faces = torch.cat((faces, faces), dim=0)
 
         # [Raa, Rba, Rab, Rbb], cross render multiview images
-        silhouettes, sparsity = self.renderer(vertices, faces, use_soft=self.use_soft, display_taken=True)  # call render_mesh in forward()
-        return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss, sparsity
+        if display_taken:
+            silhouettes, sparsity = self.renderer(vertices, faces, use_soft=self.use_soft, display_taken=display_taken)  # call render_mesh in forward()
+            return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss, sparsity
+        else:
+            silhouettes = self.renderer(vertices, faces, use_soft=self.use_soft, display_taken=display_taken)  # call render_mesh in forward()
+            return silhouettes.chunk(4, dim=0), laplacian_loss, flatten_loss, area_loss
 
     def evaluate_iou(self, images, voxels, return_voxel=False):
         vertices, faces = self.reconstruct(images)
@@ -181,8 +185,8 @@ class Model(nn.Module):
         else:
             return iou, vertices, faces, voxels_predict
 
-    def forward(self, images=None, viewpoints=None, voxels=None, task='train'):
+    def forward(self, images=None, viewpoints=None, voxels=None, task='train', return_voxel=False, display_taken=False):
         if task == 'train':
-            return self.predict_multiview(images[0], images[1], viewpoints[0], viewpoints[1])
+            return self.predict_multiview(images[0], images[1], viewpoints[0], viewpoints[1], display_taken)
         elif task == 'test':
-            return self.evaluate_iou(images, voxels)
+            return self.evaluate_iou(images, voxels, return_voxel)
